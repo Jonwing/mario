@@ -3,11 +3,11 @@ package internal
 import (
 	"errors"
 	"fmt"
+	"github.com/Jonwing/mario/pkg/ssh"
 	"github.com/gdamore/tcell"
 	"github.com/rivo/tview"
 	"github.com/sirupsen/logrus"
 	"io"
-	"mario/pkg/ssh"
 	"sort"
 	"strconv"
 	"time"

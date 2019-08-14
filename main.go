@@ -1,6 +1,6 @@
 package main
 
-import "mario/cmd"
+import "github.com/Jonwing/mario/cmd"
 
 func main() {
 	cmd.Execute()

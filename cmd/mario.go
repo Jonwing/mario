@@ -1,11 +1,11 @@
 package cmd
 
 import (
+	"github.com/Jonwing/mario/internal"
 	json "github.com/json-iterator/go"
 	"github.com/sirupsen/logrus"
 	"github.com/spf13/cobra"
 	"io/ioutil"
-	"mario/internal"
 	"os/user"
 	"path"
 	"strings"

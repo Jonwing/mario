@@ -2,8 +2,8 @@ package internal
 
 import (
 	"bytes"
+	"github.com/Jonwing/mario/pkg/ssh"
 	"io/ioutil"
-	"mario/pkg/ssh"
 	"os/user"
 	"path"
 	"strconv"

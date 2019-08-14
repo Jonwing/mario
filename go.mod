@@ -1,4 +1,4 @@
-module mario
+module github.com/Jonwing/mario
 
 go 1.12
 

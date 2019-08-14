@@ -2,11 +2,11 @@ package cmd
 
 import (
 	"errors"
+	"github.com/Jonwing/mario/internal"
 	jsoniter "github.com/json-iterator/go"
 	"github.com/sirupsen/logrus"
 	"github.com/spf13/cobra"
 	"io/ioutil"
-	"mario/internal"
 	"path"
 	"strconv"
 	"strings"
