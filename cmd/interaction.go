@@ -74,6 +74,35 @@ func NewInteractiveCommand(dashboard *internal.Dashboard) *interactiveCmd {
 		RunE: it.execute,
 	}
 
+	openCmd := &cobra.Command{
+		Use: "open [flags]",
+		Short: "Establish tunnel",
+		RunE: it.openTunnel,
+	}
+
+	closeCmd := &cobra.Command{
+		Use: "close [tunnel_id] [flags]",
+		Short: "Close tunnel",
+		Long: "Close tunnel by [tunnel_id], can also use the --name(-n) to specify tunnel name",
+		RunE: it.closeTunnel,
+	}
+
+	upCmd := &cobra.Command{
+		Use: "up [tunnel_id]",
+		Short: "Reconnect disconnected tunnel",
+		Long: "Reconnect disconnected tunnel",
+		RunE: it.reconnectTunnel,
+	}
+
+	saveCmd := &cobra.Command{
+		Use: "save [flags]",
+		Short: "Save your tunnels config to file system.",
+		Long: "provide --output(-o) to specify path to save, if not, user home directory will be used.",
+		RunE: it.saveTunnels,
+	}
+
+	it.command.AddCommand(openCmd, closeCmd, saveCmd, upCmd)
+
 	it.command.Flags().StringVarP(&it.name, "name", "n", "", "specify tunnel name")
 	it.command.Flags().StringVarP(
 		&it.link, "link", "l", "",
