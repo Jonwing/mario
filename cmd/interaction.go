@@ -103,22 +103,22 @@ func NewInteractiveCommand(dashboard *internal.Dashboard) *interactiveCmd {
 
 	it.command.AddCommand(openCmd, closeCmd, saveCmd, upCmd)
 
-	it.command.Flags().StringVarP(&it.name, "name", "n", "", "specify tunnel name")
-	it.command.Flags().StringVarP(
+	it.command.PersistentFlags().StringVarP(&it.name, "name", "n", "", "specify tunnel name")
+	openCmd.Flags().StringVarP(
 		&it.link, "link", "l", "",
 		"composed format of the tunnel info. e.g. 1080:192.168.1.2:1080@user@host.com:22, " +
 		"this establishes a tunnel from local port 1080 to remote 1080 port of 192.168.1.2 " +
 		"in the network of ssh server user@host.com, ssh port 22")
-	it.command.Flags().IntVarP(&it.port, "port", "p",
+	openCmd.Flags().IntVarP(&it.port, "port", "p",
 		22, "local port of the tunnel to listen")
-	it.command.Flags().StringVarP(&it.server, "server", "s", "",
+	openCmd.Flags().StringVarP(&it.server, "server", "s", "",
 		"the ssh server address of this tunnel, e.g. user@host.com:22, " +
 		"if port not specified, the default port 22 will be used.")
-	it.command.Flags().StringVarP(&it.remote, "remote", "r", "",
+	openCmd.Flags().StringVarP(&it.remote, "remote", "r", "",
 		"the remote endpoint of the tunnel. e.g. 192.168.1.2:1080")
-	it.command.Flags().StringVarP(&it.privateKeyPath, "key", "k", "",
+	it.command.PersistentFlags().StringVarP(&it.privateKeyPath, "key", "k", "",
 		"the ssh private key file path, if not provided, the global key path will be used")
-	it.command.Flags().StringVarP(&it.configOut, "output", "o", "",
+	saveCmd.Flags().StringVarP(&it.configOut, "output", "o", "",
 		"the output file path to save tunnels information")
 
 	it.command.SetOut(it.dashboard.GetLogView())
