@@ -33,6 +33,9 @@ type baseCommand struct {
 
 	// runs in background, without terminal UI
 	bg bool
+
+	// Debug if true, logs the debug logs
+	debug bool
 }
 
 
@@ -43,7 +46,11 @@ func (b *baseCommand) getCommand() *cobra.Command {
 func (b *baseCommand) runDefault(cmd *cobra.Command, args []string) error {
 	logger := new(log)
 	dashBoard := internal.DefaultDashboard(b.pkPath, logger)
-	logrus.SetLevel(logrus.InfoLevel)
+	if b.debug {
+		logrus.SetLevel(logrus.DebugLevel)
+	} else {
+		logrus.SetLevel(logrus.InfoLevel)
+	}
 	logrus.SetOutput(dashBoard.GetLogView())
 	// logrus.SetFormatter(&logrus.TextFormatter{})
 	configs := &tConfigs{Tunnels:make([]*tConfig, 0)}
@@ -58,7 +65,6 @@ func (b *baseCommand) runDefault(cmd *cobra.Command, args []string) error {
 			return err
 		}
 	}
-
 	// TODO: if bg is true
 	tCmd := NewInteractiveCommand(dashBoard)
 
@@ -71,6 +77,11 @@ func (b *baseCommand) runDefault(cmd *cobra.Command, args []string) error {
 			}
 		}
 		for txt := range dashBoard.GetInput() {
+			lower := strings.ToLower(strings.TrimSpace(txt))
+			if lower == "exit" || lower == "quit" {
+				dashBoard.Quit()
+				return
+			}
 			args := strings.Split(txt, " ")
 			err := tCmd.RunCommand(args[1:])
 			if err != nil {
@@ -108,6 +119,8 @@ func BuildCommand() *baseCommand {
 		&b.heartbeatInterval, "i", 15, "i(interval): the check-alive interval of a tunnel in second")
 	b.cmd.PersistentFlags().BoolVarP(
 		&b.bg, "detach", "d", false, "d(detach): run mario in background")
+	b.cmd.PersistentFlags().BoolVarP(
+		&b.debug, "debug", "v", false, "(v)erbose: logs the debug info")
 	return b
 }
 

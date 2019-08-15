@@ -77,7 +77,6 @@ func (d *Dashboard) Show() error {
 	}
 	go func() {
 		for t := range tn {
-
 			if err := t.Error(); err != nil && t.GetStatus() != status[ssh.StatusClosed] {
 				errStr := fmt.Sprintf("[Error] Tunnel <%d> (%s) raised an error: %s\n", t.GetID(), t.GetName(), t.Error())
 				d.logView.Write([]byte(errStr))
@@ -87,6 +86,13 @@ func (d *Dashboard) Show() error {
 	}()
 	go d.updateTunnelInfo()
 	return d.Layout.Run()
+}
+
+func (d *Dashboard) Quit() {
+	d.mario.Stop()
+	logrus.Infoln("Bye.")
+	time.Sleep(2*time.Second)
+	d.Layout.Stop()
 }
 
 func DefaultDashboard(pk string, log logger) *Dashboard {

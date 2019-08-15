@@ -3,6 +3,7 @@ package internal
 import (
 	"bytes"
 	"github.com/Jonwing/mario/pkg/ssh"
+	"github.com/sirupsen/logrus"
 	"io/ioutil"
 	"os/user"
 	"path"
@@ -221,12 +222,20 @@ func (m *Mario) Monitor() (<-chan *TunnelInfo, error) {
 				for t := range m.wrappers {
 					go t.KeepAlive()
 				}
-				case <-m.stop:
-					break
+			case <-m.stop:
+				break
 			}
 		}
 	}()
 	return m.publishWrapper, nil
+}
+
+func (m *Mario) Stop() {
+	logrus.Debugln("*Mario stop")
+	m.stop <- struct{}{}
+	for tn := range m.wrappers {
+		tn.Down()
+	}
 }
 
 
