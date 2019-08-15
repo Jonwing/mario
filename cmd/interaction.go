@@ -254,7 +254,7 @@ func (i *interactiveCmd) saveTunnels(cmd *cobra.Command, args []string) error {
 	}
 
 	err = ioutil.WriteFile(outPath, marshaled, 0644)
-	if err != nil {
+	if err == nil {
 		logrus.Infoln("tunnels have been saved to ", outPath)
 	}
 	return err
