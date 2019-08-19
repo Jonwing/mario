@@ -30,7 +30,7 @@ var (
 		"save": actionSave,
 		"help": actionHelp,
 	}
-	names = []string{"close", "help", "open", "save", "tunnel", "up"}
+	names = []string{"close", "help", "next", "open", "prev", "save", "tunnel", "up"}
 )
 
 type iArgs struct {
@@ -101,7 +101,19 @@ func NewInteractiveCommand(dashboard *internal.Dashboard) *interactiveCmd {
 		RunE: it.saveTunnels,
 	}
 
-	it.command.AddCommand(openCmd, closeCmd, saveCmd, upCmd)
+	nxtPageCmd := &cobra.Command{
+		Use: "next",
+		Short: "turn to next page",
+		Run: it.nextPage,
+	}
+
+	prevPageCmd := &cobra.Command{
+		Use: "prev",
+		Short: "turn to previous page",
+		Run: it.prevPage,
+	}
+
+	it.command.AddCommand(openCmd, closeCmd, saveCmd, upCmd, nxtPageCmd, prevPageCmd)
 
 	it.command.PersistentFlags().StringVarP(&it.name, "name", "n", "", "specify tunnel name")
 	openCmd.Flags().StringVarP(
@@ -259,6 +271,16 @@ func (i *interactiveCmd) saveTunnels(cmd *cobra.Command, args []string) error {
 	}
 	return err
 }
+
+func (i *interactiveCmd) nextPage(cmd *cobra.Command, args []string) {
+	i.dashboard.Page(1)
+}
+
+func (i *interactiveCmd) prevPage(cmd *cobra.Command, args []string) {
+	i.dashboard.Page(-1)
+}
+
+
 
 
 func (i *interactiveCmd) autoComplete(current string) (entries []string) {

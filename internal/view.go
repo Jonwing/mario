@@ -243,6 +243,15 @@ func (d *Dashboard) GetTunnels() []*TunnelInfo {
 	return tns
 }
 
+func (d *Dashboard) Page(dir int)  {
+	if dir < 0 {
+		d.tnView.PrevPage()
+	} else {
+		d.tnView.NextPage()
+	}
+	d.Layout.Draw()
+}
+
 // debug purpose
 func (d *Dashboard) GetInput() <-chan string {
 	return d.input

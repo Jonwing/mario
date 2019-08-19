@@ -69,7 +69,7 @@ func (s *SimpleTable) Header() []string  {
 }
 
 func (s *SimpleTable) Row(index int) []string {
-	if index >= len(s.headers) || index < 0 {
+	if index >= len(s.rows) || index < 0 {
 		return nil
 	}
 	return s.rows[index]
@@ -213,16 +213,16 @@ func (t *TableView) Draw(screen tcell.Screen)  {
 	}
 
 	tview.Print(screen, buf.String(), x, y, width, tview.AlignLeft, tcell.ColorDeepSkyBlue)
-
 	y++
 
+	overflowed := false
 	for idx := 0; idx < t.tb.Len(); idx++ {
 		if idx < t.top {
 			continue
 		}
 
 		if y >= bottomLimit {
-			t.bottom = idx - 1
+			overflowed = true
 			break
 		}
 
@@ -232,7 +232,11 @@ func (t *TableView) Draw(screen tcell.Screen)  {
 			tview.Print(screen, v, cursor, y, colWidth, tview.AlignLeft, tcell.ColorDefault)
 			cursor += colWidth
 		}
+		t.bottom = idx
 		y++
+	}
+	if !overflowed {
+		t.bottom = -1
 	}
 }
 
@@ -249,6 +253,25 @@ func (t *TableView) RemoveRow(row int) {
 		t.onChanged(t, row)
 	}
 }
+
+func (t *TableView) NextPage() {
+	if t.bottom < 0 {
+		return
+	}
+	t.top = t.bottom + 1
+}
+
+func (t *TableView) PrevPage() {
+	_, _, _, height := t.GetInnerRect()
+	height--
+	newTop := t.top - height
+	if newTop > 0 {
+		t.top = newTop
+	} else {
+		t.top = 0
+	}
+}
+
 
 func (t *TableView) SetOnChangedFunc(f func(*TableView, int)) {
 	t.onChanged = f
@@ -277,8 +300,7 @@ func NewTableView(tb table) *TableView {
 	t := &TableView{
 		Box:       tview.NewBox(),
 		tb:        tb,
-		top:       0,
-		bottom:    0,
+		bottom:    -1,
 	}
 	return t
 }
