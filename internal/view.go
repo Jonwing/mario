@@ -51,7 +51,9 @@ func byName(i, j *TunnelInfo) bool {
 type Dashboard struct {
 	Layout *tview.Application
 
-	tnView *tview.List
+	// tnView *tview.List
+
+	tnView *TableView
 
 	tunnelRecv chan *TunnelInfo
 
@@ -100,12 +102,15 @@ func DefaultDashboard(pk string, log logger) *Dashboard {
 		Layout:    tview.NewApplication(),
 		tunnels: make([]*TunnelInfo, 0),
 		tunnelRecv: make(chan *TunnelInfo, 16),
-		tnView:    tview.NewList(),
+		// tnView:    tview.NewList(),
 		logView:   tview.NewTextView(),
 		inputView: tview.NewInputField().SetLabel("> "),
 		input:     make(chan string),
 		mario:	   NewMario(pk, 15*time.Second, log),
 	}
+
+	tb, _ := SimpleTableView([]string{"id", "name", "status", "link"}, []int{1, 2, 2, 5})
+	d.tnView = tb
 
 	// total flex
 	flex := tview.NewFlex().SetDirection(tview.FlexRow)
@@ -144,17 +149,21 @@ func (d *Dashboard) updateTunnelInfo() {
 		})
 		if idx < len(d.tunnels) && d.tunnels[idx].GetID() == tn.GetID() {
 			logrus.Debugf("tn %d %s", tn.GetID(), tn.GetStatus())
-			d.tnView.SetItemText(idx, tn.GetStatus(), d.formatTunnel(tn))
+			d.tnView.UpdateRow(idx, 2, tn.GetStatus())
 		} else {
-			// TODO: sorting every time a TunnelInfo is added is expensive
 			d.tunnels = append(d.tunnels, tn)
-			tnSorter(byID).sort(d.tunnels)
-			d.tnView.Clear()
-			for _, tn := range d.tunnels {
-				d.tnView.AddItem(tn.GetStatus(), d.formatTunnel(tn), ' ', nil)
+			if len(d.tunnels) <= 1 || tn.GetID() <= d.tunnels[len(d.tunnels)-1].GetID() {
+				tnSorter(byID).sort(d.tunnels)
+				err := d.tnView.InsertRow(idx, []string{ strconv.Itoa(tn.GetID()), tn.GetName(), tn.GetStatus(), tn.Represent()})
+				// d.tnView.Clear()
+				// for _, tn := range d.tunnels {
+				// 	err := d.tnView.AddRows([]string{ strconv.Itoa(tn.GetID()), tn.GetName(), tn.GetStatus(), tn.Represent()})
+				if err != nil {
+					logrus.Errorf("can not display tunnel %s because of %s", tn.Represent(), err.Error())
+				}
+				// }
 			}
 		}
-		// TODO: How to use d.tnView.Draw ?
 		d.Layout.Draw()
 	}
 }
