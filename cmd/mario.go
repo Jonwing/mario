@@ -73,10 +73,10 @@ func (b *baseCommand) runDefault(cmd *cobra.Command, args []string) error {
 
 	go func() {
 		for _, cfg := range configs.Tunnels {
-			err := dashBoard.NewTunnel(cfg.Name, cfg.LocalPort, cfg.SshServer, cfg.MapTo, cfg.PrivateKey)
+			err := dashBoard.NewTunnel(cfg.Name, cfg.Local, cfg.SshServer, cfg.MapTo, cfg.PrivateKey)
 			if err != nil {
 				logrus.WithError(err).Errorf(
-					"Open tunnel failed. port: %d, server: %s, remote: %s", cfg.LocalPort, cfg.SshServer, cfg.MapTo)
+					"Open tunnel failed. local: %d, server: %s, remote: %s", cfg.Local, cfg.SshServer, cfg.MapTo)
 			}
 		}
 		for txt := range dashBoard.GetInput() {

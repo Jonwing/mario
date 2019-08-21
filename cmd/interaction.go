@@ -3,7 +3,7 @@ package cmd
 import (
 	"errors"
 	"github.com/Jonwing/mario/internal"
-	jsoniter "github.com/json-iterator/go"
+	json "github.com/json-iterator/go"
 	"github.com/sirupsen/logrus"
 	"github.com/spf13/cobra"
 	"io/ioutil"
@@ -37,12 +37,12 @@ type iArgs struct {
 	// name the tunnel name
 	name string
 
-	// link shortcut to specify tunnel config. e.g. 8080:192.168.1.2:8080@user@one_host.com:22
-	// it this flag is set, the port, server, remote flag will be ignored
+	// link shortcut to specify tunnel config. e.g. 0.0.0.0:8080:192.168.1.2:8080@user@one_host.com:22
+	// it this flag is set, the local, server, remote flag will be ignored
 	link string
 
-	// the tunnel local port
-	port int
+	// the tunnel local listening address
+	local string
 
 	// the ssh server address, include user. e.g. user@one_host.com:22
 	server string
@@ -119,13 +119,13 @@ func NewInteractiveCommand(dashboard *internal.Dashboard) *interactiveCmd {
 	openCmd.Flags().StringVarP(
 		&it.link, "link", "l", "",
 		"composed format of the tunnel info. e.g. 1080:192.168.1.2:1080@user@host.com:22, " +
-		"this establishes a tunnel from local port 1080 to remote 1080 port of 192.168.1.2 " +
-		"in the network of ssh server user@host.com, ssh port 22")
-	openCmd.Flags().IntVarP(&it.port, "port", "p",
-		22, "local port of the tunnel to listen")
+		"this establishes a tunnel from local local 1080 to remote 1080 local of 192.168.1.2 " +
+		"in the network of ssh server user@host.com, ssh local 22")
+	openCmd.Flags().StringVar(&it.local, "local",
+		":8080", "local local of the tunnel to listen")
 	openCmd.Flags().StringVarP(&it.server, "server", "s", "",
 		"the ssh server address of this tunnel, e.g. user@host.com:22, " +
-		"if port not specified, the default port 22 will be used.")
+		"if local not specified, the default local 22 will be used.")
 	openCmd.Flags().StringVarP(&it.remote, "remote", "r", "",
 		"the remote endpoint of the tunnel. e.g. 192.168.1.2:1080")
 	it.command.PersistentFlags().StringVarP(&it.privateKeyPath, "key", "k", "",
@@ -175,17 +175,19 @@ func (i *interactiveCmd) openTunnel(cmd *cobra.Command, args []string) (err erro
 			logrus.Errorln("wrong link: ", i.link)
 			return nil
 		}
-		// this should split mapping into [port, remote] slice
-		mapping := strings.SplitN(parts[0], ":", 2)
-		if len(mapping) != 2 {
+		// this should split mapping into [local host, local port, remote] slice
+		mapping := strings.SplitN(parts[0], ":", 3)
+		if len(mapping) != 3 {
 			logrus.Errorln("wrong link: ", i.link)
 			return nil
 		}
-		i.port, err = strconv.Atoi(mapping[0])
+
+		_, err = strconv.Atoi(mapping[1])
 		if err != nil {
 			return
 		}
-		i.remote = mapping[1]
+		i.local = strings.Join(mapping[:2], ":")
+		i.remote = mapping[2]
 
 		i.server = parts[1]
 	} else {
@@ -194,10 +196,10 @@ func (i *interactiveCmd) openTunnel(cmd *cobra.Command, args []string) (err erro
 		}
 	}
 
-	err = i.dashboard.NewTunnel(i.name, i.port, i.server, i.remote, i.privateKeyPath)
+	err = i.dashboard.NewTunnel(i.name, i.local, i.server, i.remote, i.privateKeyPath)
 	if err != nil {
 		logrus.WithError(err).Errorf(
-			"Open tunnel failed. port: %d, server: %s, remote: %s", i.port, i.server, i.remote)
+			"Open tunnel failed. local: %d, server: %s, remote: %s", i.local, i.server, i.remote)
 	}
 	return err
 }
@@ -247,7 +249,7 @@ func (i *interactiveCmd) saveTunnels(cmd *cobra.Command, args []string) error {
 	for _, tn := range tns {
 		cfg := new(tConfig)
 		cfg.Name = tn.GetName()
-		cfg.LocalPort = tn.GetLocalPort()
+		cfg.Local = tn.GetLocal()
 		cfg.PrivateKey = tn.GetPrivateKeyPath()
 		cfg.MapTo = tn.GetRemote()
 		cfg.SshServer = tn.GetServer()
@@ -260,7 +262,7 @@ func (i *interactiveCmd) saveTunnels(cmd *cobra.Command, args []string) error {
 		outPath = path.Join(GetUserHome(), "tunnels.json")
 	}
 
-	marshaled, err := jsoniter.MarshalIndent(tnConfig, "", "    ")
+	marshaled, err := json.MarshalIndent(tnConfig, "", "    ")
 	if err != nil {
 		return err
 	}

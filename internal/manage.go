@@ -58,8 +58,8 @@ func (t *TunnelInfo) GetPrivateKeyPath() string {
 	return t.privateKey
 }
 
-func (t *TunnelInfo) GetLocalPort() int {
-	return t.t.LocalPort
+func (t *TunnelInfo) GetLocal() string {
+	return t.t.Local
 }
 
 func (t *TunnelInfo) GetServer() string {
@@ -137,7 +137,7 @@ func (m *Mario) wrap(t *ssh.Tunnel) *TunnelInfo {
 	return &TunnelInfo{id: int(id), t: t, name: strconv.Itoa(int(id)), mario: m}
 }
 
-func (m *Mario) Establish(name string, localPort int, server, remote string, pk string) (*TunnelInfo, error){
+func (m *Mario) Establish(name string, local, server, remote string, pk string) (*TunnelInfo, error){
 	var key *bytes.Buffer
 	if pk == "" {
 		if m.keyBuf == nil {
@@ -156,7 +156,7 @@ func (m *Mario) Establish(name string, localPort int, server, remote string, pk 
 		key = bytes.NewBuffer(keyBytes)
 	}
 
-	tn, err := ssh.NewTunnel(localPort, server, remote, key, m.handleTunnel)
+	tn, err := ssh.NewTunnel(local, server, remote, key, m.handleTunnel)
 	if err != nil {
 		return nil, err
 	}

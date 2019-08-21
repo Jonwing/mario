@@ -177,8 +177,8 @@ func (d *Dashboard) GetLogView() io.Writer {
 	return d.logView
 }
 
-func (d *Dashboard) NewTunnel(name string, localPort int, server, remote string, pk string) error {
-	tn, err := d.mario.Establish(name, localPort, server, remote, pk)
+func (d *Dashboard) NewTunnel(name string, local, server, remote string, pk string) error {
+	tn, err := d.mario.Establish(name, local, server, remote, pk)
 	if err != nil {
 		return err
 	}

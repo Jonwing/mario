@@ -47,7 +47,7 @@ type tConfigs struct {
 type tConfig struct {
 	Name string	`json:"name"`
 
-	LocalPort int	`json:"local_port"`
+	Local string `json:"local"`
 
 	SshServer string	`json:"ssh_server"`
 

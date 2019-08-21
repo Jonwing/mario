@@ -22,6 +22,7 @@ const (
 )
 
 var (
+	errInvalidLocalAddr = errors.New("invalid local listening address")
 	errNegativePort = errors.New("port can not be negative")
 	errAnonymous = errors.New("user not specified")
 	errMissedPort = errors.New("remote port not specified")
@@ -39,8 +40,8 @@ type Connector struct {
 
 
 type Tunnel struct {
-	// LocalPort Tunnel will listen at 127.0.0.1:<LocalPort> for connections
-	LocalPort int
+	// Local the listen address for local tcp server
+	Local string
 
 	// SSHUri The ssh server's uri in form of "user@hostname:port", if port is absent,
 	// the default ssh port 22 will be used
@@ -109,7 +110,7 @@ func (c *Connector) Close() {
 }
 
 func (t *Tunnel) String() string {
-	return strconv.Itoa(t.LocalPort) + "->" + t.SSHUri + "->" + t.ForwardTo
+	return t.Local + "->" + t.SSHUri + "->" + t.ForwardTo
 }
 
 func (t *Tunnel) Up() error {
@@ -118,7 +119,7 @@ func (t *Tunnel) Up() error {
 		t.UpdateStatus(StatusConnectFailed)
 		return t.err
 	}
-	listener, err := net.Listen("tcp", "127.0.0.1:"+strconv.Itoa(t.LocalPort))
+	listener, err := net.Listen("tcp", t.Local)
 	if err != nil {
 		t.err = err
 		t.UpdateStatus(StatusConnectFailed)
@@ -170,7 +171,7 @@ func (t *Tunnel) Reconnect() {
 	t.Down()
 	// to avoid write op on the &t, create a new Tunnel to connect
 	newT := Tunnel{
-		LocalPort:  t.LocalPort,
+		Local:  t.Local,
 		SSHUri:     t.SSHUri,
 		ForwardTo:  t.ForwardTo,
 		sshConfig:  t.sshConfig,
@@ -208,10 +209,16 @@ func NewConnector(local, remote net.Conn) *Connector {
 // network of ssh server <server>. 'server' is in form of 'user@host:port', if port is absent,
 // the default ssh port 22 is used. 'remote' is in form of 'host:port', 'pk' should contain the private key
 // of this tunnel.
-func NewTunnel(localPort int, server string, remote string, pk io.Reader, onStatus tunnelHandler) (tn *Tunnel, err error) {
-	if localPort < 0 {
-		return nil, errNegativePort
+func NewTunnel(local string, server string, remote string, pk io.Reader, onStatus tunnelHandler) (tn *Tunnel, err error) {
+	locals := strings.Split(local, ":")
+	if len(locals) < 2 {
+		return nil, errInvalidLocalAddr
 	}
+
+	if _, err := strconv.Atoi(locals[1]); err != nil {
+		return nil, err
+	}
+
 	serverParts := strings.Split(server, "@")
 	if len(serverParts) < 2 {
 		return nil, errAnonymous
@@ -244,7 +251,7 @@ func NewTunnel(localPort int, server string, remote string, pk io.Reader, onStat
 	}
 
 	tn = &Tunnel{
-		LocalPort:  localPort,
+		Local:  local,
 		SSHUri:     serverParts[1],
 		ForwardTo:  remote,
 		sshConfig:  sshConfig,
