@@ -68,7 +68,7 @@ type interactiveCmd struct {
 func NewInteractiveCommand(dashboard *internal.Dashboard) *interactiveCmd {
 	it := &interactiveCmd{dashboard:dashboard}
 	it.command = &cobra.Command{
-		Use: "tunnel [action] [flags]",
+		Use: " [action] [flags]",
 		Short: "manage tunnels",
 		Long: "open, close and save tunnels",
 		RunE: it.execute,

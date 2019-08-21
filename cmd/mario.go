@@ -8,8 +8,11 @@ import (
 	"io/ioutil"
 	"os/user"
 	"path"
+	"regexp"
 	"strings"
 )
+
+var spacePtn = regexp.MustCompile(`\s+`)
 
 
 type handler func(cmd *cobra.Command, args []string) error
@@ -77,13 +80,14 @@ func (b *baseCommand) runDefault(cmd *cobra.Command, args []string) error {
 			}
 		}
 		for txt := range dashBoard.GetInput() {
+			txt = spacePtn.ReplaceAllString(txt, " ")
 			lower := strings.ToLower(strings.TrimSpace(txt))
 			if lower == "exit" || lower == "quit" {
 				dashBoard.Quit()
 				return
 			}
 			args := strings.Split(txt, " ")
-			err := tCmd.RunCommand(args[1:])
+			err := tCmd.RunCommand(args)
 			if err != nil {
 				logrus.Errorln("command error: ", err.Error())
 			}
