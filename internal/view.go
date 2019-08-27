@@ -51,7 +51,7 @@ func byName(i, j *TunnelInfo) bool {
 type Dashboard struct {
 	Layout *tview.Application
 
-	// tnView *tview.List
+	history *history
 
 	tnView *TableView
 
@@ -102,7 +102,7 @@ func DefaultDashboard(pk string, log logger) *Dashboard {
 		Layout:    tview.NewApplication(),
 		tunnels: make([]*TunnelInfo, 0),
 		tunnelRecv: make(chan *TunnelInfo, 16),
-		// tnView:    tview.NewList(),
+		history:   NewHistory(),
 		logView:   tview.NewTextView(),
 		inputView: tview.NewInputField().SetLabel("> "),
 		input:     make(chan string),
@@ -127,10 +127,23 @@ func DefaultDashboard(pk string, log logger) *Dashboard {
 
 	// inputView is responsible for user input
 	d.inputView.SetDoneFunc(func(key tcell.Key) {
-		if key == tcell.KeyEnter {
+		switch key {
+		case tcell.KeyEnter:
 			text := d.inputView.GetText()
 			d.inputView.SetText("")
 			d.input <- text
+		case tcell.KeyUp:
+			last := d.history.Prev()
+			if last == "" {
+				return
+			}
+			d.inputView.SetText(last)
+		case tcell.KeyDown:
+			next := d.history.Next()
+			if next == "" {
+				return
+			}
+			d.inputView.SetText(next)
 		}
 	})
 	flex = flex.AddItem(
@@ -255,4 +268,8 @@ func (d *Dashboard) Page(dir int)  {
 // debug purpose
 func (d *Dashboard) GetInput() <-chan string {
 	return d.input
+}
+
+func (d *Dashboard) MakeHistory(input string) {
+	d.history.Append(input)
 }

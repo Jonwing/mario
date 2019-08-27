@@ -90,6 +90,8 @@ func (b *baseCommand) runDefault(cmd *cobra.Command, args []string) error {
 			err := tCmd.RunCommand(args)
 			if err != nil {
 				logrus.Errorln("command error: ", err.Error())
+			} else {
+				dashBoard.MakeHistory(txt)
 			}
 		}
 	}()
