@@ -15,25 +15,30 @@ const (
 	StatusNew = TunnelStatus(iota)
 	StatusConnecting
 	StatusConnectFailed
+	StatusListeningErr
 	StatusConnected
 	StatusReconnecting
 	StatusLost
 	StatusClosed
+	StatusWorkError
 )
 
 var (
 	errInvalidLocalAddr = errors.New("invalid local listening address")
-	errNegativePort = errors.New("port can not be negative")
-	errAnonymous = errors.New("user not specified")
-	errMissedPort = errors.New("remote port not specified")
-	errConnectionLost = errors.New("connection lost")
+	errNegativePort     = errors.New("port can not be negative")
+	errAnonymous        = errors.New("user not specified")
+	errMissedPort       = errors.New("remote port not specified")
+	errConnectionLost   = errors.New("connection lost")
+	errShutdown         = errors.New("shutdown")
+	errRemove			= errors.New("removed")
 )
 
 type TunnelStatus int
 type tunnelHandler func(*Tunnel)
 
-// Connector a Connector represents a pair of tunneled connections
-type Connector struct {
+// connector a connector represents a pair of tunneled connections
+type connector struct {
+	tunnel *Tunnel
 	localConn net.Conn
 	remoteConn net.Conn
 }
@@ -51,13 +56,15 @@ type Tunnel struct {
 	// "hostname:port"
 	ForwardTo string
 
+	works chan func() error
+
 	listener net.Listener
 
 	sshConfig *sh.ClientConfig
 
 	sshClient *sh.Client
 
-	connectors []*Connector
+	connectors []*connector
 
 	OnStatus tunnelHandler
 
@@ -68,19 +75,20 @@ type Tunnel struct {
 }
 
 func (t *Tunnel) KeepAlive() {
-	if t.Status == StatusClosed {
-		return
-	}
-	if t.sshClient == nil {
-		t.err = errConnectionLost
-		t.UpdateStatus(StatusLost)
-		t.Reconnect()
-		return
-	}
-	_, _, err := t.sshClient.SendRequest("keepalive@openssh.com", true, nil)
-	if err != nil {
-		t.UpdateStatus(StatusLost)
-		t.Reconnect()
+	t.works <- func() error {
+		if t.Status == StatusClosed {
+			return nil
+		}
+		if t.sshClient == nil {
+			t.setStatusError(StatusLost, nil)
+			return t.forceConnect()
+		}
+		_, _, err := t.sshClient.SendRequest("keepalive@openssh.com", true, nil)
+		if err != nil {
+			t.setStatusError(StatusLost, err)
+			return t.forceConnect()
+		}
+		return nil
 	}
 }
 
@@ -88,7 +96,7 @@ func (t *Tunnel) Error() error {
 	return t.err
 }
 
-func (c *Connector) Forward() error {
+func (c *connector) Forward() error {
 	go c.localToRemote()
 	_, err := io.Copy(c.remoteConn, c.localConn)
 	c.remoteConn.Close()
@@ -96,7 +104,7 @@ func (c *Connector) Forward() error {
 	return err
 }
 
-func (c *Connector) localToRemote() {
+func (c *connector) localToRemote() {
 	_, err := io.Copy(c.localConn, c.remoteConn)
 	if err != nil {
 		c.remoteConn.Close()
@@ -104,7 +112,7 @@ func (c *Connector) localToRemote() {
 	}
 }
 
-func (c *Connector) Close() {
+func (c *connector) Close() {
 	c.remoteConn.Close()
 	c.localConn.Close()
 }
@@ -113,78 +121,113 @@ func (t *Tunnel) String() string {
 	return t.Local + "->" + t.SSHUri + "->" + t.ForwardTo
 }
 
-func (t *Tunnel) Up() error {
-	if t.sshClient != nil || t.listener != nil {
-		t.err = errors.New("tunnel is already up")
-		t.UpdateStatus(StatusConnectFailed)
-		return t.err
+func (t *Tunnel) forceConnect() error {
+	if t.listener != nil {
+		t.listener.Close()
+		// t.listener = nil
 	}
-	listener, err := net.Listen("tcp", t.Local)
-	if err != nil {
-		t.err = err
-		t.UpdateStatus(StatusConnectFailed)
-		return err
-	}
-	t.listener = listener
-	defer listener.Close()
-	t.UpdateStatus(StatusConnecting)
 
+	if t.sshClient != nil {
+		t.sshClient.Close()
+		// t.sshClient = nil
+	}
+	t.setStatusError(StatusConnecting, nil)
+	var err error
 	t.sshClient, err = sh.Dial("tcp", t.SSHUri, t.sshConfig)
 	if err != nil {
-		t.err = err
-		t.UpdateStatus(StatusConnectFailed)
 		return err
 	}
-	t.UpdateStatus(StatusConnected)
-	for {
-		conn, err := listener.Accept()
+
+	t.listener, err = net.Listen("tcp", t.Local)
+	if err != nil {
+		return err
+	}
+	t.setStatusError(StatusConnected, nil)
+	go t.listenLocal()
+	return nil
+}
+
+func (t *Tunnel) Up() {
+	err := t.forceConnect()
+	if err != nil {
+		t.setStatusError(StatusConnectFailed, err)
+		return
+	}
+
+	for work := range t.works {
+		err := work()
 		if err != nil {
-			t.err = err
-			t.UpdateStatus(StatusConnectFailed)
-			return err
+			if err.Error() == errRemove.Error() {
+				t.UpdateStatus(StatusClosed, nil)
+				return
+			}
+			t.setStatusError(StatusWorkError, err)
+		}
+	}
+}
+
+func (t *Tunnel) listenLocal() {
+	defer t.sshClient.Close()
+	defer t.listener.Close()
+	for {
+		conn, err := t.listener.Accept()
+		if err != nil {
+			t.UpdateStatus(StatusListeningErr, err)
+			return
 		}
 		// TODO: don't dial in current goroutine, in case of timeout blocking
-		remoteConn, err := t.sshClient.Dial("tcp", t.ForwardTo)
-		if err != nil {
-			continue
+		t.works <- func() error {
+			remoteConn, err := t.sshClient.Dial("tcp", t.ForwardTo)
+			if err != nil {
+				return nil
+			}
+			cnt := newConnector(conn, remoteConn)
+			t.connectors = append(t.connectors, cnt)
+			go cnt.Forward()
+			return nil
 		}
-		cnt := NewConnector(conn, remoteConn)
-		t.connectors = append(t.connectors, cnt)
-		go cnt.Forward()
 	}
 }
 
 func (t *Tunnel) Down() {
-	for _, c := range t.connectors {
-		c.Close()
-	}
-	if t.listener != nil {
+	t.works <- func() error {
+		for _, cnt := range t.connectors {
+			cnt.Close()
+		}
 		t.listener.Close()
+		t.UpdateStatus(StatusClosed, nil)
+		return errShutdown
 	}
-	if t.sshClient != nil {
-		t.sshClient.Close()
+}
+
+// the difference between Down() and Destroy() is that Destroy() exits the running
+// goroutine so that all subsequent works will failed, which making this tunnel unavailable
+func (t *Tunnel) Destroy() {
+	t.works <- func() error {
+		for _, cnt := range t.connectors {
+			cnt.Close()
+		}
+		t.listener.Close()
+		return errRemove
 	}
-	t.UpdateStatus(StatusClosed)
 }
 
 func (t *Tunnel) Reconnect() {
-	t.Down()
-	// to avoid write op on the &t, create a new Tunnel to connect
-	newT := Tunnel{
-		Local:  t.Local,
-		SSHUri:     t.SSHUri,
-		ForwardTo:  t.ForwardTo,
-		sshConfig:  t.sshConfig,
-		connectors: make([]*Connector, 0),
-		OnStatus:   t.OnStatus,
-		Status:     StatusReconnecting,
-	}
-	*t = newT
-	t.Up()
+	t.works <- t.forceConnect
 }
 
 
-func (t *Tunnel) UpdateStatus(st TunnelStatus) {
+func (t *Tunnel) UpdateStatus(st TunnelStatus, err error) {
+	t.works <- func() error {
+		t.setStatusError(st, err)
+		return nil
+	}
+}
+
+func (t *Tunnel) setStatusError(st TunnelStatus, err error) {
+	if err != nil {
+		t.err = err
+	}
 	t.Status = st
 	if t.OnStatus != nil {
 		t.OnStatus(t)
@@ -196,8 +239,8 @@ func (t *Tunnel) User() string {
 }
 
 
-func NewConnector(local, remote net.Conn) *Connector {
-	cnt := &Connector{
+func newConnector(local, remote net.Conn) *connector {
+	cnt := &connector{
 		localConn:  local,
 		remoteConn: remote,
 	}
@@ -205,7 +248,7 @@ func NewConnector(local, remote net.Conn) *Connector {
 }
 
 
-// NewTunnel create a new Tunnel forwarding packages from 127.0.0.1:<localPort> to <remote> which is in the
+// NewTunnel create a new Tunnel forwarding packages from <local> to <remote> which is in the
 // network of ssh server <server>. 'server' is in form of 'user@host:port', if port is absent,
 // the default ssh port 22 is used. 'remote' is in form of 'host:port', 'pk' should contain the private key
 // of this tunnel.
@@ -251,13 +294,14 @@ func NewTunnel(local string, server string, remote string, pk io.Reader, onStatu
 	}
 
 	tn = &Tunnel{
-		Local:  local,
+		Local:      local,
 		SSHUri:     serverParts[1],
 		ForwardTo:  remote,
 		sshConfig:  sshConfig,
-		connectors: make([]*Connector, 0),
-		OnStatus: onStatus,
-		Status: StatusNew,
+		connectors: make([]*connector, 0),
+		OnStatus:   onStatus,
+		Status:     StatusNew,
+		works:      make(chan func() error, 32),
 	}
 	return tn, nil
 }

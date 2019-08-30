@@ -28,6 +28,8 @@ var status = map[ssh.TunnelStatus]string{
 	ssh.StatusClosed: "closed",
 	ssh.StatusReconnecting: "reconnecting",
 	ssh.StatusLost: "lost",
+	ssh.StatusWorkError: "error",
+	ssh.StatusListeningErr: "listening error",
 }
 
 type act int
@@ -240,8 +242,8 @@ func (m *Mario) Stop() {
 
 
 func NewMario(pkPath string, heartbeat time.Duration, logger logger) *Mario {
-	if heartbeat < 15*time.Second {
-		heartbeat = 15*time.Second
+	if heartbeat < 30*time.Second {
+		heartbeat = 30*time.Second
 	}
 	if pkPath == "" {
 		u, err := user.Current()
