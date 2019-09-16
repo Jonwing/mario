@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"fmt"
 	"github.com/Jonwing/mario/pkg/ssh"
 	"github.com/c-bata/go-prompt"
 	json "github.com/json-iterator/go"
@@ -65,7 +66,16 @@ func (i *interactiveCmd) AddChildren(cmd ...completeCmder) {
 	}
 }
 
-func (i *interactiveCmd) ClearFlags() {}
+func (i *interactiveCmd) ClearFlags() {
+	h := i.command.Flags().Lookup("help")
+	if h == nil {
+		return
+	}
+	err := h.Value.Set("false")
+	if err != nil {
+		fmt.Printf("error clearing help flag: %s\n", err.Error())
+	}
+}
 
 
 func (i *interactiveCmd) runCommand(txt string) {
@@ -154,7 +164,16 @@ func (c *command) AddChildren(cmd ...completeCmder) {
 	c.children = append(c.children, cmd...)
 }
 
-func (c *command) ClearFlags() {}
+func (c *command) ClearFlags() {
+	h := c.cmd.Flags().Lookup("help")
+	if h == nil {
+		return
+	}
+	err := h.Value.Set("false")
+	if err != nil {
+		fmt.Printf("error clearing help flag: %s\n", err.Error())
+	}
+}
 
 // openCommand is responsible for establishing a new SSH tunnel
 // usage:
@@ -183,6 +202,7 @@ type openCommand struct {
 }
 
 func (o *openCommand) ClearFlags() {
+	o.command.ClearFlags()
 	o.link = ""
 	o.local = ""
 	o.server = ""
@@ -254,6 +274,7 @@ type closeOrUpCommand struct {
 }
 
 func (c *closeOrUpCommand)  ClearFlags() {
+	c.command.ClearFlags()
 	c.tunnelName = ""
 }
 
@@ -323,6 +344,7 @@ type saveCommand struct {
 
 func (s *saveCommand) ClearFlags() {
 	s.output = ""
+	s.command.ClearFlags()
 }
 
 func (s *saveCommand) Complete(args []string, word string) []prompt.Suggest {
@@ -372,6 +394,11 @@ type connectionCommand struct {
 	tunnelName string
 
 	table *tablewriter.Table
+}
+
+func (c *connectionCommand) ClearFlags() {
+	c.command.ClearFlags()
+	c.tunnelName = ""
 }
 
 func (c *connectionCommand) Complete(args []string, word string) []prompt.Suggest {

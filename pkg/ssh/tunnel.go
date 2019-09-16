@@ -65,14 +65,14 @@ func (c *Connector) Less(item btree.Item) bool {
 func (c *Connector) forward() error {
 	go c.localToRemote()
 	_, err := io.Copy(c.remoteConn, c.localConn)
-	c.breakDown()
+	c.Close()
 	return err
 }
 
 func (c *Connector) localToRemote() {
 	_, err := io.Copy(c.localConn, c.remoteConn)
 	if err != nil {
-		c.breakDown()
+		c.Close()
 	}
 }
 
