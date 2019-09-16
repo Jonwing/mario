@@ -96,6 +96,10 @@ func (t *TunnelInfo) Up() error {
 	return t.mario.Up(t)
 }
 
+func (t *TunnelInfo) Connections() []*ssh.Connector {
+	return t.t.GetConnectors()
+}
+
 
 type logger interface {
 	Debugf(format string, args ...interface{})
@@ -172,7 +176,9 @@ func (m *Mario) Establish(name string, local, server, remote string, pk string) 
 		tw.privateKey = pk
 	}
 
-	m.actions <- &tnAction{act: actOpen, tn:  tw}
+	m.wm.Lock()
+	m.wrappers[tn] = tw
+	m.wm.Unlock()
 	go tn.Up()
 	return tw, nil
 }
@@ -208,16 +214,20 @@ func (m *Mario) Monitor() (<-chan *TunnelInfo, error) {
 				case actOpen:
 					m.wrappers[action.tn.t] = action.tn
 				case actClose:
-					action.tn.t.Down()
+					action.tn.t.Down(false)
 				case actReconnect:
 					go action.tn.t.Reconnect()
 				}
 			case raw := <-m.updatedTunnels:
+				m.wm.RLock()
 				wrapped, ok := m.wrappers[raw]
+				m.wm.RUnlock()
 				if !ok {
 					wrapped = m.wrap(raw)
 					wrapped.name = "unknown"
+					m.wm.Lock()
 					m.wrappers[wrapped.t] = wrapped
+					m.wm.Unlock()
 				}
 				m.publishWrapper <- wrapped
 			case <-ticker.C:
@@ -233,10 +243,10 @@ func (m *Mario) Monitor() (<-chan *TunnelInfo, error) {
 }
 
 func (m *Mario) Stop() {
-	logrus.Debugln("*Mario stop")
+	logrus.Debugln("Mario stop")
 	m.stop <- struct{}{}
 	for tn := range m.wrappers {
-		tn.Down()
+		tn.Down(true)
 	}
 }
 

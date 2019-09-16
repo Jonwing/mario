@@ -1,25 +1,17 @@
 package cmd
 
 import (
+	"fmt"
 	"github.com/Jonwing/mario/internal"
 	json "github.com/json-iterator/go"
 	"github.com/sirupsen/logrus"
 	"github.com/spf13/cobra"
 	"io/ioutil"
+	"os"
 	"os/user"
 	"path"
-	"regexp"
-	"strings"
+	"runtime/pprof"
 )
-
-var spacePtn = regexp.MustCompile(`\s+`)
-
-
-type handler func(cmd *cobra.Command, args []string) error
-
-type cmder interface {
-	getCommand() *cobra.Command
-}
 
 
 type baseCommand struct {
@@ -47,6 +39,28 @@ func (b *baseCommand) getCommand() *cobra.Command {
 }
 
 func (b *baseCommand) runDefault(cmd *cobra.Command, args []string) error {
+	doProf := os.Getenv("MARIO_PROF")
+	if doProf != "" {
+		cpuProf, err := os.Create("cpu.prof")
+		if err != nil {
+			return err
+		}
+		memProf, err := os.Create("mem.prof")
+		if err != nil {
+			return err
+		}
+		err = pprof.StartCPUProfile(cpuProf)
+		if err != nil {
+			return err
+		}
+
+		defer func() {
+			pprof.StopCPUProfile()
+			pprof.WriteHeapProfile(memProf)
+			cpuProf.Close()
+			memProf.Close()
+		}()
+	}
 	logger := new(log)
 	dashBoard := internal.DefaultDashboard(b.pkPath, logger)
 	if b.debug {
@@ -54,7 +68,6 @@ func (b *baseCommand) runDefault(cmd *cobra.Command, args []string) error {
 	} else {
 		logrus.SetLevel(logrus.InfoLevel)
 	}
-	logrus.SetOutput(dashBoard.GetLogView())
 	// logrus.SetFormatter(&logrus.TextFormatter{})
 	configs := &tConfigs{Tunnels:make([]*tConfig, 0)}
 	// if we get a configPath, load the config
@@ -73,34 +86,27 @@ func (b *baseCommand) runDefault(cmd *cobra.Command, args []string) error {
 
 	go func() {
 		for _, cfg := range configs.Tunnels {
-			err := dashBoard.NewTunnel(cfg.Name, cfg.Local, cfg.SshServer, cfg.MapTo, cfg.PrivateKey)
-			if err != nil {
-				logrus.WithError(err).Errorf(
-					"Open tunnel failed. local: %d, server: %s, remote: %s", cfg.Local, cfg.SshServer, cfg.MapTo)
-			}
-		}
-		for txt := range dashBoard.GetInput() {
-			txt = spacePtn.ReplaceAllString(txt, " ")
-			lower := strings.ToLower(strings.TrimSpace(txt))
-			if lower == "exit" || lower == "quit" {
-				dashBoard.Quit()
-				return
-			}
-			args := strings.Split(txt, " ")
-			err := tCmd.RunCommand(args)
-			if err != nil {
-				logrus.Errorln("command error: ", err.Error())
-			} else {
-				dashBoard.MakeHistory(txt)
-			}
+			dashBoard.NewTunnel(cfg.Name, cfg.Local, cfg.SshServer, cfg.MapTo, cfg.PrivateKey)
+			// if err != nil {
+			// 	logrus.WithError(err).Errorf(
+			// 		"Open tunnel failed. local: %d, server: %s, remote: %s", cfg.Local, cfg.SshServer, cfg.MapTo)
+			// }
 		}
 	}()
-	err := dashBoard.Show()
-	return err
+	err := dashBoard.Work()
+	if err != nil {
+		return err
+	}
+	tCmd.command.Usage()
+	tCmd.Run()
+	return nil
 }
 
 func (b *baseCommand) Execute() {
-	logrus.Fatal(b.cmd.Execute())
+	err := b.cmd.Execute()
+	if err != nil {
+		fmt.Printf("error: %s", err.Error())
+	}
 }
 
 
@@ -126,7 +132,7 @@ func BuildCommand() *baseCommand {
 	b.cmd.PersistentFlags().BoolVarP(
 		&b.bg, "detach", "d", false, "d(detach): run mario in background")
 	b.cmd.PersistentFlags().BoolVarP(
-		&b.debug, "debug", "v", false, "(v)erbose: logs the debug info")
+		&b.debug, "debug", "v", false, "(v)verbose: logs the debug info")
 	return b
 }
 

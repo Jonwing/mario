@@ -3,6 +3,7 @@ package ssh
 import (
 	"bytes"
 	"errors"
+	"github.com/google/btree"
 	sh "golang.org/x/crypto/ssh"
 	"io"
 	"net"
@@ -36,11 +37,53 @@ var (
 type TunnelStatus int
 type tunnelHandler func(*Tunnel)
 
-// connector a connector represents a pair of tunneled connections
-type connector struct {
+// Connector a Connector represents a pair of tunneled connections
+type Connector struct {
+	counter uint64
+	openedAt time.Time
 	tunnel *Tunnel
 	localConn net.Conn
 	remoteConn net.Conn
+}
+
+func (c *Connector) String() string {
+	return c.localConn.RemoteAddr().String() + "->" + c.tunnel.String()
+}
+
+func (c *Connector) ID() uint64 {
+	return c.counter
+}
+
+func (c *Connector) Less(item btree.Item) bool {
+	other, ok := item.(*Connector)
+	if !ok {
+		return false
+	}
+	return c.counter < other.counter
+}
+
+func (c *Connector) forward() error {
+	go c.localToRemote()
+	_, err := io.Copy(c.remoteConn, c.localConn)
+	c.breakDown()
+	return err
+}
+
+func (c *Connector) localToRemote() {
+	_, err := io.Copy(c.localConn, c.remoteConn)
+	if err != nil {
+		c.breakDown()
+	}
+}
+
+func (c *Connector) Close() {
+	c.breakDown()
+	c.tunnel.closeConnector(c)
+}
+
+func (c *Connector)	breakDown() {
+	c.remoteConn.Close()
+	c.localConn.Close()
 }
 
 
@@ -64,11 +107,13 @@ type Tunnel struct {
 
 	sshClient *sh.Client
 
-	connectors []*connector
+	connectors *btree.BTree
 
 	OnStatus tunnelHandler
 
 	Status TunnelStatus
+
+	cCount uint64
 
 	// err stores the latest error of this tunnel if there is one
 	err error
@@ -96,29 +141,8 @@ func (t *Tunnel) Error() error {
 	return t.err
 }
 
-func (c *connector) Forward() error {
-	go c.localToRemote()
-	_, err := io.Copy(c.remoteConn, c.localConn)
-	c.remoteConn.Close()
-	c.localConn.Close()
-	return err
-}
-
-func (c *connector) localToRemote() {
-	_, err := io.Copy(c.localConn, c.remoteConn)
-	if err != nil {
-		c.remoteConn.Close()
-		c.localConn.Close()
-	}
-}
-
-func (c *connector) Close() {
-	c.remoteConn.Close()
-	c.localConn.Close()
-}
-
 func (t *Tunnel) String() string {
-	return t.Local + "->" + t.SSHUri + "->" + t.ForwardTo
+	return t.Local + " -> " + t.SSHUri + " -> " + t.ForwardTo
 }
 
 func (t *Tunnel) forceConnect() error {
@@ -158,7 +182,7 @@ func (t *Tunnel) Up() {
 		err := work()
 		if err != nil {
 			if err.Error() == errRemove.Error() {
-				t.UpdateStatus(StatusClosed, nil)
+				t.setStatusError(StatusClosed, nil)
 				return
 			}
 			t.setStatusError(StatusWorkError, err)
@@ -175,41 +199,60 @@ func (t *Tunnel) listenLocal() {
 			t.UpdateStatus(StatusListeningErr, err)
 			return
 		}
-		// TODO: don't dial in current goroutine, in case of timeout blocking
 		t.works <- func() error {
 			remoteConn, err := t.sshClient.Dial("tcp", t.ForwardTo)
 			if err != nil {
 				return nil
 			}
-			cnt := newConnector(conn, remoteConn)
-			t.connectors = append(t.connectors, cnt)
-			go cnt.Forward()
+			cnt := t.newConnector(conn, remoteConn)
+			// t.connectors = append(t.connectors, cnt)
+			go cnt.forward()
 			return nil
 		}
 	}
 }
 
-func (t *Tunnel) Down() {
-	t.works <- func() error {
-		for _, cnt := range t.connectors {
-			cnt.Close()
-		}
-		t.listener.Close()
-		t.UpdateStatus(StatusClosed, nil)
-		return errShutdown
+func (t *Tunnel) Down(waitClose bool) {
+	bufSize := 1
+	if waitClose {
+		bufSize = 0
 	}
+	ok := make(chan struct{}, bufSize)
+	t.works <- func() error {
+		t.connectors.Ascend(func(i btree.Item) bool {
+			cnt := i.(*Connector)
+			cnt.breakDown()
+			return true
+		})
+		t.connectors.Clear(false)
+		t.listener.Close()
+		ok <- struct{}{}
+		t.setStatusError(StatusClosed, nil)
+		return nil
+	}
+	<-ok
 }
 
 // the difference between Down() and Destroy() is that Destroy() exits the running
 // goroutine so that all subsequent works will failed, which making this tunnel unavailable
-func (t *Tunnel) Destroy() {
+func (t *Tunnel) Destroy(waitClose bool) {
+	bufSize := 1
+	if waitClose {
+		bufSize = 0
+	}
+	ok := make(chan struct{}, bufSize)
 	t.works <- func() error {
-		for _, cnt := range t.connectors {
-			cnt.Close()
-		}
+		t.connectors.Ascend(func(i btree.Item) bool {
+			cnt := i.(*Connector)
+			cnt.breakDown()
+			return true
+		})
+		t.connectors.Clear(false)
 		t.listener.Close()
+		ok <- struct{}{}
 		return errRemove
 	}
+	<-ok
 }
 
 func (t *Tunnel) Reconnect() {
@@ -225,9 +268,12 @@ func (t *Tunnel) UpdateStatus(st TunnelStatus, err error) {
 }
 
 func (t *Tunnel) setStatusError(st TunnelStatus, err error) {
-	if err != nil {
-		t.err = err
+	// if the last status is closed, suppress the broadcasting of listening error
+	if st == StatusListeningErr && t.Status == StatusClosed {
+		return
 	}
+	t.err = err
+
 	t.Status = st
 	if t.OnStatus != nil {
 		t.OnStatus(t)
@@ -239,12 +285,38 @@ func (t *Tunnel) User() string {
 }
 
 
-func newConnector(local, remote net.Conn) *connector {
-	cnt := &connector{
+func (t *Tunnel) newConnector(local, remote net.Conn) *Connector {
+	t.cCount++
+	cnt := &Connector{
+		tunnel: t,
 		localConn:  local,
 		remoteConn: remote,
+		openedAt: time.Now(),
+		counter: t.cCount,
 	}
+	t.connectors.ReplaceOrInsert(cnt)
 	return cnt
+}
+
+func (t *Tunnel) closeConnector(c *Connector) {
+	t.works <- func() error {
+		t.connectors.Delete(c)
+		return nil
+	}
+}
+
+func (t *Tunnel) GetConnectors() []*Connector {
+	connChan := make(chan []*Connector)
+	t.works <- func() error {
+		cs := make([]*Connector, 0, t.connectors.Len())
+		t.connectors.Ascend(func(i btree.Item) bool {
+			cs = append(cs, i.(*Connector))
+			return true
+		})
+		connChan <- cs
+		return nil
+	}
+	return <-connChan
 }
 
 
@@ -298,7 +370,7 @@ func NewTunnel(local string, server string, remote string, pk io.Reader, onStatu
 		SSHUri:     serverParts[1],
 		ForwardTo:  remote,
 		sshConfig:  sshConfig,
-		connectors: make([]*connector, 0),
+		connectors: btree.New(2),
 		OnStatus:   onStatus,
 		Status:     StatusNew,
 		works:      make(chan func() error, 32),

@@ -1,15 +1,14 @@
 package cmd
 
 import (
-	"errors"
 	"github.com/Jonwing/mario/internal"
-	json "github.com/json-iterator/go"
-	"github.com/sirupsen/logrus"
+	"github.com/c-bata/go-prompt"
+	"github.com/c-bata/go-prompt/completer"
+	"github.com/olekukonko/tablewriter"
 	"github.com/spf13/cobra"
-	"io/ioutil"
-	"path"
+	"os"
+	"regexp"
 	"strconv"
-	"strings"
 )
 
 type action int
@@ -22,16 +21,7 @@ const (
 	actionHelp
 )
 
-var (
-	actions = map[string]action{
-		"open": actionOpenTunnel,
-		"close": actionCloseTunnel,
-		"up": 	actionReconnect,
-		"save": actionSave,
-		"help": actionHelp,
-	}
-	names = []string{"close", "help", "next", "open", "prev", "save", "tunnel", "up"}
-)
+var	spacePtn = regexp.MustCompile(`\s+`)
 
 type iArgs struct {
 	// name the tunnel name
@@ -59,83 +49,87 @@ type iArgs struct {
 
 type interactiveCmd struct {
 	iArgs
-	
+
 	command *cobra.Command
 
 	dashboard *internal.Dashboard
+
+	// belows are members for prompt
+	pmt *prompt.Prompt
+
+	tw *tablewriter.Table
+
+	exitParser *ExitParser
+
+	children []completeCmder
+
 }
 
 func NewInteractiveCommand(dashboard *internal.Dashboard) *interactiveCmd {
-	it := &interactiveCmd{dashboard:dashboard}
+	it := &interactiveCmd{
+		dashboard:dashboard,
+		tw: tablewriter.NewWriter(os.Stdout),
+	}
 	it.command = &cobra.Command{
-		Use: " [command] [flags]",
+		Use: "[command]",
 		Short: "manage tunnels",
 		Long: "open, close and save tunnels",
-		RunE: it.execute,
+		Run: it.execute,
 	}
 
-	openCmd := &cobra.Command{
-		Use: "open [flags]",
-		Short: "Establish tunnel",
-		RunE: it.openTunnel,
-	}
+	it.command.SetUsageTemplate(`mario helps you handle multiple SSH tunnels, you can open,
+close, save tunnels in one place.
 
-	closeCmd := &cobra.Command{
-		Use: "close [tunnel_id] [flags]",
-		Short: "Close tunnel",
-		Long: "Close tunnel by [tunnel_id], can also use the --name(-n) to specify tunnel name",
-		RunE: it.closeTunnel,
-	}
+Usage:{{if .Runnable}}
+	[command] [flags]{{end}}{{if gt (len .Aliases) 0}}
 
-	upCmd := &cobra.Command{
-		Use: "up [tunnel_id]",
-		Short: "Reconnect disconnected tunnel",
-		Long: "Reconnect disconnected tunnel",
-		RunE: it.reconnectTunnel,
-	}
+Aliases:
+  {{.NameAndAliases}}{{end}}{{if .HasExample}}
 
-	saveCmd := &cobra.Command{
-		Use: "save [flags]",
-		Short: "Save your tunnels config to file system.",
-		Long: "provide --output(-o) to specify path to save, if not, user home directory will be used.",
-		RunE: it.saveTunnels,
-	}
+Examples:
+{{.Example}}{{end}}{{if .HasAvailableSubCommands}}
 
-	nxtPageCmd := &cobra.Command{
-		Use: "next",
-		Short: "turn to next page",
-		Run: it.nextPage,
-	}
+Available Commands:{{range .Commands}}{{if (or .IsAvailableCommand (eq .Name "help"))}}
+  {{rpad .Name .NamePadding }} {{.Short}}{{end}}{{end}}{{end}}{{if .HasAvailableLocalFlags}}
 
-	prevPageCmd := &cobra.Command{
-		Use: "prev",
-		Short: "turn to previous page",
-		Run: it.prevPage,
-	}
+Flags:
+{{.LocalFlags.FlagUsages | trimTrailingWhitespaces}}{{end}}{{if .HasAvailableInheritedFlags}}
 
-	it.command.AddCommand(openCmd, closeCmd, saveCmd, upCmd, nxtPageCmd, prevPageCmd)
+Global Flags:
+{{.InheritedFlags.FlagUsages | trimTrailingWhitespaces}}{{end}}{{if .HasHelpSubCommands}}
 
-	it.command.PersistentFlags().StringVarP(&it.name, "name", "n", "", "specify tunnel name")
-	openCmd.Flags().StringVarP(
-		&it.link, "link", "l", "",
-		"composed format of the tunnel info. e.g. 1080:192.168.1.2:1080@user@host.com:22, " +
-		"this establishes a tunnel from local local 1080 to remote 1080 local of 192.168.1.2 " +
-		"in the network of ssh server user@host.com, ssh local 22")
-	openCmd.Flags().StringVar(&it.local, "local",
-		":8080", "local local of the tunnel to listen")
-	openCmd.Flags().StringVarP(&it.server, "server", "s", "",
-		"the ssh server address of this tunnel, e.g. user@host.com:22, " +
-		"if local not specified, the default local 22 will be used.")
-	openCmd.Flags().StringVarP(&it.remote, "remote", "r", "",
-		"the remote endpoint of the tunnel. e.g. 192.168.1.2:1080")
+Additional help topics:{{range .Commands}}{{if .IsAdditionalHelpTopicCommand}}
+  {{rpad .CommandPath .CommandPathPadding}} {{.Short}}{{end}}{{end}}{{end}}{{if .HasAvailableSubCommands}}
+
+Use "[command] --help" for more information about a command.{{end}}
+`)
+
+	it.tw.SetHeader([]string{"id", "name", "status", "link", "remark"})
+	it.tw.SetRowLine(false)
+
+	it.exitParser = NewExitParser()
+
+	it.pmt = prompt.New(
+		it.runCommand,
+		it.complete,
+		prompt.OptionParser(it.exitParser),
+		prompt.OptionTitle("mario: handler multiple SSH tunnels"),
+		prompt.OptionPrefix("> "),
+		prompt.OptionInputTextColor(prompt.Green),
+		prompt.OptionCompletionWordSeparator(completer.FilePathCompletionSeparator),
+		prompt.OptionSuggestionTextColor(prompt.DarkGray),
+		prompt.OptionSuggestionBGColor(prompt.DarkBlue),
+		prompt.OptionDescriptionTextColor(prompt.DarkGray),
+		prompt.OptionDescriptionBGColor(prompt.Black),
+		prompt.OptionSelectedSuggestionTextColor(prompt.DarkBlue),
+		prompt.OptionSelectedSuggestionBGColor(prompt.White),
+		prompt.OptionSelectedDescriptionTextColor(prompt.Black),
+		prompt.OptionSelectedDescriptionBGColor(prompt.DarkBlue),
+		)
+
 	it.command.PersistentFlags().StringVarP(&it.privateKeyPath, "key", "k", "",
 		"the ssh private key file path, if not provided, the global key path will be used")
-	saveCmd.Flags().StringVarP(&it.configOut, "output", "o", "",
-		"the output file path to save tunnels information")
-
-	it.command.SetOut(it.dashboard.GetLogView())
-	it.command.SetErr(it.dashboard.GetLogView())
-	it.dashboard.SetInputAutoComplete(it.autoComplete)
+	it.buildCommands()
 	return it
 }
 
@@ -144,165 +138,152 @@ func (i *interactiveCmd) RunCommand(args []string) (err error) {
 	return i.command.Execute()
 }
 
-func (i *interactiveCmd) execute(cmd *cobra.Command, args []string) (err error) {
+func (i *interactiveCmd) execute(cmd *cobra.Command, args []string) {
 	if len(args) < 1 {
-		return i.command.Usage()
-	}
-	act, ok := actions[args[0]]
-	if !ok {
-		return i.command.Usage()
+		i.command.Usage()
+		return
 	}
 
-	switch act {
-	case actionOpenTunnel:
-		return i.openTunnel(cmd, args[1:])
-	case actionCloseTunnel:
-		return i.closeTunnel(cmd, args[1:])
-	case actionSave:
-		return i.saveTunnels(cmd, args[1:])
-	case actionReconnect:
-		return i.reconnectTunnel(cmd, args[1:])
-	default:
-		return i.command.Usage()
-	}
+	// switch act {
+	// case actionOpenTunnel:
+	// 	i.openTunnel(cmd, args[1:])
+	// case actionCloseTunnel:
+	// 	i.closeTunnel(cmd, args[1:])
+	// case actionSave:
+	// 	i.saveTunnels(cmd, args[1:])
+	// case actionReconnect:
+	// 	i.reconnectTunnel(cmd, args[1:])
+	// default:
+	// 	i.command.Usage()
+	// }
 }
 
-func (i *interactiveCmd) openTunnel(cmd *cobra.Command, args []string) (err error) {
-	if i.link != "" {
-		// this should split the link into [mapping, server] slice
-		parts := strings.SplitN(i.link, "@", 2)
-		if len(parts) != 2 {
-			logrus.Errorln("wrong link: ", i.link)
-			return nil
-		}
-		// this should split mapping into [local host, local port, remote] slice
-		mapping := strings.SplitN(parts[0], ":", 3)
-		if len(mapping) != 3 {
-			logrus.Errorln("wrong link: ", i.link)
-			return nil
-		}
-
-		_, err = strconv.Atoi(mapping[1])
-		if err != nil {
-			return
-		}
-		i.local = strings.Join(mapping[:2], ":")
-		i.remote = mapping[2]
-
-		i.server = parts[1]
-	} else {
-		if i.server == "" || i.remote == "" {
-			return errors.New("[Error]Should specify server by -s and remote by -r")
-		}
-	}
-
-	err = i.dashboard.NewTunnel(i.name, i.local, i.server, i.remote, i.privateKeyPath)
-	if err != nil {
-		logrus.WithError(err).Errorf(
-			"Open tunnel failed. local: %d, server: %s, remote: %s", i.local, i.server, i.remote)
-	}
-	return err
-}
+// func (i *interactiveCmd) openTunnel(cmd *cobra.Command, args []string) {
+// 	if i.link != "" {
+// 		// this should split the link into [mapping, server] slice
+// 		parts := strings.SplitN(i.link, "@", 2)
+// 		if len(parts) != 2 {
+// 			logrus.Errorln("wrong link: ", i.link)
+// 			return
+// 		}
+// 		// this should split mapping into [local host, local port, remote] slice
+// 		mapping := strings.SplitN(parts[0], ":", 3)
+// 		if len(mapping) != 3 {
+// 			logrus.Errorln("wrong link: ", i.link)
+// 			return
+// 		}
+//
+// 		_, err := strconv.Atoi(mapping[1])
+// 		if err != nil {
+// 			logrus.Errorln("port must be a number: ", mapping[1])
+// 			return
+// 		}
+// 		i.local = strings.Join(mapping[:2], ":")
+// 		i.remote = mapping[2]
+//
+// 		i.server = parts[1]
+// 	} else {
+// 		if i.server == "" || i.remote == "" {
+// 			logrus.Errorln("[Error]Should specify server by -s and remote by -r")
+// 			return
+// 		}
+// 	}
+//
+// 	err := i.dashboard.NewTunnel(i.name, i.local, i.server, i.remote, i.privateKeyPath)
+// 	if err != nil {
+// 		logrus.WithError(err).Errorf(
+// 			"Open tunnel failed. local: %d, server: %s, remote: %s", i.local, i.server, i.remote)
+// 	}
+// }
 
 
 // closeTunnel the command is like "tunnel close 1 " or "tunnel close --name alias"
 // if there is an id provided, it would be at args[0], and the name flag will be ignored
-func (i *interactiveCmd) closeTunnel(cmd *cobra.Command, args []string) (err error) {
-	if len(args) == 0 && i.name == "" {
-		return errors.New("specify tunnel id or tunnel name")
-	}
-	if len(args) > 0 {
-		id, err := strconv.Atoi(args[0])
-		if err != nil {
-			return err
-		}
-		// close tunnel with id
-		logrus.Infoln("[Info] close tunnel ", id)
-		return i.dashboard.CloseTunnel(id)
-	}
+// func (i *interactiveCmd) closeTunnel(cmd *cobra.Command, args []string) {
+// 	if len(args) == 0 && i.name == "" {
+// 		logrus.Errorln("specify tunnel id or tunnel name")
+// 		return
+// 	}
+// 	if len(args) > 0 {
+// 		id, err := strconv.Atoi(args[0])
+// 		if err != nil {
+// 			logrus.Errorln("id should be a number", args[0])
+// 			return
+// 		}
+// 		// close tunnel with id
+// 		logrus.Infoln("[Info] close tunnel ", id)
+// 		i.dashboard.CloseTunnel(id)
+// 	}
+//
+// 	logrus.Infoln("[Info] close tunnel ", i.name)
+// 	i.dashboard.CloseTunnel(i.name)
+// }
 
-	logrus.Infoln("[Info] close tunnel ", i.name)
-	return i.dashboard.CloseTunnel(i.name)
-}
+// func (i *interactiveCmd) reconnectTunnel(cmd *cobra.Command, args []string) {
+// 	if len(args) == 0 && i.name == "" {
+// 		logrus.Errorln("specify tunnel id or tunnel name")
+// 		return
+// 	}
+// 	if len(args) > 0 {
+// 		id, err := strconv.Atoi(args[0])
+// 		if err != nil {
+// 			logrus.Errorln("id should be a number", args[0])
+// 			return
+// 		}
+// 		// close tunnel with id
+// 		logrus.Infoln("[Info] up tunnel ", id)
+// 		i.dashboard.UpTunnel(id)
+// 	}
+//
+// 	logrus.Infoln("[Info] close tunnel ", i.name)
+// 	i.dashboard.UpTunnel(i.name)
+// }
 
-func (i *interactiveCmd) reconnectTunnel(cmd *cobra.Command, args []string) (err error) {
-	if len(args) == 0 && i.name == "" {
-		return errors.New("specify tunnel id or tunnel name")
-	}
-	if len(args) > 0 {
-		id, err := strconv.Atoi(args[0])
-		if err != nil {
-			return err
-		}
-		// close tunnel with id
-		logrus.Infoln("[Info] up tunnel ", id)
-		return i.dashboard.UpTunnel(id)
-	}
+// func (i *interactiveCmd) saveTunnels(cmd *cobra.Command, args []string) {
+// 	tns := i.dashboard.GetTunnels()
+// 	configs := make([]*tConfig, 0)
+// 	for _, tn := range tns {
+// 		cfg := new(tConfig)
+// 		cfg.Name = tn.GetName()
+// 		cfg.Local = tn.GetLocal()
+// 		cfg.PrivateKey = tn.GetPrivateKeyPath()
+// 		cfg.MapTo = tn.GetRemote()
+// 		cfg.SshServer = tn.GetServer()
+// 		configs = append(configs, cfg)
+// 	}
+//
+// 	tnConfig := &tConfigs{Tunnels:configs}
+// 	outPath := i.configOut
+// 	if outPath == "" {
+// 		outPath = path.Join(GetUserHome(), "tunnels.json")
+// 	}
+//
+// 	marshaled, err := json.MarshalIndent(tnConfig, "", "    ")
+// 	if err != nil {
+// 		logrus.WithError(err).Errorln("save tunnels failed.")
+// 	}
+//
+// 	err = ioutil.WriteFile(outPath, marshaled, 0644)
+// 	if err != nil {
+// 		logrus.Errorln("can not write file to disk because of: ", err)
+// 	}
+// }
 
-	logrus.Infoln("[Info] close tunnel ", i.name)
-	return i.dashboard.UpTunnel(i.name)
-}
-
-func (i *interactiveCmd) saveTunnels(cmd *cobra.Command, args []string) error {
+func (i *interactiveCmd) listTunnels(cmd *cobra.Command, args []string) {
+	i.tw.ClearRows()
 	tns := i.dashboard.GetTunnels()
-	configs := make([]*tConfig, 0)
-	for _, tn := range tns {
-		cfg := new(tConfig)
-		cfg.Name = tn.GetName()
-		cfg.Local = tn.GetLocal()
-		cfg.PrivateKey = tn.GetPrivateKeyPath()
-		cfg.MapTo = tn.GetRemote()
-		cfg.SshServer = tn.GetServer()
-		configs = append(configs, cfg)
-	}
-
-	tnConfig := &tConfigs{Tunnels:configs}
-	outPath := i.configOut
-	if outPath == "" {
-		outPath = path.Join(GetUserHome(), "tunnels.json")
-	}
-
-	marshaled, err := json.MarshalIndent(tnConfig, "", "    ")
-	if err != nil {
-		return err
-	}
-
-	err = ioutil.WriteFile(outPath, marshaled, 0644)
-	if err == nil {
-		logrus.Infoln("tunnels have been saved to ", outPath)
-	}
-	return err
-}
-
-func (i *interactiveCmd) nextPage(cmd *cobra.Command, args []string) {
-	i.dashboard.Page(1)
-}
-
-func (i *interactiveCmd) prevPage(cmd *cobra.Command, args []string) {
-	i.dashboard.Page(-1)
-}
-
-
-
-
-func (i *interactiveCmd) autoComplete(current string) (entries []string) {
-
-	if len(current) == 0 {
-		return
-	}
-
-	parts := strings.Split(current, " ")
-	lastWord := parts[len(parts)-1]
-
-	if lastWord == "" {
-		return
-	}
-	for _, word := range names {
-		if strings.HasPrefix(strings.ToLower(word), strings.ToLower(lastWord)) {
-			parts[len(parts)-1] = word
-			suggested := strings.Join(parts, " ")
-			entries = append(entries, suggested)
+	rows := make([][]string, len(tns))
+	for i, tn := range tns {
+		var errStr string
+		if tn.Error() != nil {
+			errStr = tn.Error().Error()
 		}
+		rows[i] = []string{strconv.Itoa(tn.GetID()), tn.GetName(), tn.GetStatus(), tn.Represent(), errStr}
 	}
-	return
+	i.tw.AppendBulk(rows)
+	i.tw.Render()
+}
+
+func (i *interactiveCmd) Run() {
+	i.pmt.Run()
 }

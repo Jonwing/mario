@@ -4,10 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"github.com/Jonwing/mario/pkg/ssh"
-	"github.com/gdamore/tcell"
-	"github.com/rivo/tview"
 	"github.com/sirupsen/logrus"
-	"io"
 	"sort"
 	"strconv"
 	"time"
@@ -49,17 +46,7 @@ func byName(i, j *TunnelInfo) bool {
 }
 
 type Dashboard struct {
-	Layout *tview.Application
-
-	history *history
-
-	tnView *TableView
-
 	tunnelRecv chan *TunnelInfo
-
-	logView *tview.TextView
-
-	inputView *tview.InputField
 
 	// tunnels holds information of all tunnels in an id-ascending order
 	tunnels []*TunnelInfo
@@ -69,7 +56,7 @@ type Dashboard struct {
 	input chan string
 }
 
-func (d *Dashboard) Show() error {
+func (d *Dashboard) Work() error {
 	if d.mario == nil {
 		return errors.New("no mario, probably run in a wrong way")
 	}
@@ -79,78 +66,32 @@ func (d *Dashboard) Show() error {
 	}
 	go func() {
 		for t := range tn {
-			if err := t.Error(); err != nil && t.GetStatus() != status[ssh.StatusClosed] {
-				errStr := fmt.Sprintf("[Error] Tunnel <%d> (%s) raised an error: %s\n", t.GetID(), t.GetName(), t.Error())
-				d.logView.Write([]byte(errStr))
-			}
+			// st := t.GetStatus()
+			// if err := t.Error(); err != nil && st != status[ssh.StatusClosed] && st != status[ssh.StatusListeningErr] {
+			// 	logrus.Errorf(
+			// 		"[Error] Tunnel <%d> (%s) raised an error: %s\n", t.GetID(), t.GetName(), t.Error())
+			// }
 			d.tunnelRecv <- t
 		}
 	}()
 	go d.updateTunnelInfo()
-	return d.Layout.Run()
+	return nil
 }
 
 func (d *Dashboard) Quit() {
 	d.mario.Stop()
 	logrus.Infoln("Bye.")
-	time.Sleep(2*time.Second)
-	d.Layout.Stop()
+	// time.Sleep(2*time.Second)
 }
 
 func DefaultDashboard(pk string, log logger) *Dashboard {
 	d := &Dashboard{
-		Layout:    tview.NewApplication(),
 		tunnels: make([]*TunnelInfo, 0),
 		tunnelRecv: make(chan *TunnelInfo, 16),
-		history:   NewHistory(),
-		logView:   tview.NewTextView(),
-		inputView: tview.NewInputField().SetLabel("> "),
 		input:     make(chan string),
 		mario:	   NewMario(pk, 15*time.Second, log),
 	}
 
-	tb, _ := SimpleTableView([]string{"id", "name", "status", "link"}, []int{1, 2, 2, 5})
-	d.tnView = tb
-
-	// total flex
-	flex := tview.NewFlex().SetDirection(tview.FlexRow)
-	subFlex := tview.NewFlex()
-	d.tnView.SetBorder(true).SetTitle(" Tunnels ")
-
-	d.logView.SetBorder(true).SetTitle(" Logs ")
-	d.logView.SetChangedFunc(func() {
-		d.Layout.Draw()
-	})
-	subFlex = subFlex.AddItem(
-		d.tnView, 0, 1, false).AddItem(
-		d.logView, 0, 1, false)
-
-	// inputView is responsible for user input
-	d.inputView.SetDoneFunc(func(key tcell.Key) {
-		switch key {
-		case tcell.KeyEnter:
-			text := d.inputView.GetText()
-			d.inputView.SetText("")
-			d.input <- text
-		case tcell.KeyUp:
-			last := d.history.Prev()
-			if last == "" {
-				return
-			}
-			d.inputView.SetText(last)
-		case tcell.KeyDown:
-			next := d.history.Next()
-			if next == "" {
-				return
-			}
-			d.inputView.SetText(next)
-		}
-	})
-	flex = flex.AddItem(
-		subFlex, 0, 9, false).AddItem(
-		d.inputView, 0, 1, true)
-
-	d.Layout = tview.NewApplication().SetRoot(flex, true).SetFocus(flex)
 	return d
 }
 
@@ -160,24 +101,13 @@ func (d *Dashboard) updateTunnelInfo() {
 		idx := sort.Search(len(d.tunnels), func(i int) bool {
 			return d.tunnels[i].GetID() >= tn.GetID()
 		})
-		if idx < len(d.tunnels) && d.tunnels[idx].GetID() == tn.GetID() {
-			logrus.Debugf("tn %d %s", tn.GetID(), tn.GetStatus())
-			d.tnView.UpdateRow(idx, 2, tn.GetStatus())
-		} else {
+		if idx >= len(d.tunnels) || d.tunnels[idx].GetID() != tn.GetID() {
 			d.tunnels = append(d.tunnels, tn)
 			if len(d.tunnels) <= 1 || tn.GetID() <= d.tunnels[len(d.tunnels)-1].GetID() {
 				tnSorter(byID).sort(d.tunnels)
-				err := d.tnView.InsertRow(idx, []string{ strconv.Itoa(tn.GetID()), tn.GetName(), tn.GetStatus(), tn.Represent()})
-				// d.tnView.Clear()
-				// for _, tn := range d.tunnels {
-				// 	err := d.tnView.AddRows([]string{ strconv.Itoa(tn.GetID()), tn.GetName(), tn.GetStatus(), tn.Represent()})
-				if err != nil {
-					logrus.Errorf("can not display tunnel %s because of %s", tn.Represent(), err.Error())
-				}
-				// }
 			}
 		}
-		d.Layout.Draw()
+		logrus.Debugf("tunnel <%d><%s> status changed to: %s", tn.GetID(), tn.GetName(), tn.GetStatus())
 	}
 }
 
@@ -185,10 +115,6 @@ func (d *Dashboard) Update(tn *TunnelInfo) {
 	d.tunnelRecv <- tn
 }
 
-
-func (d *Dashboard) GetLogView() io.Writer {
-	return d.logView
-}
 
 func (d *Dashboard) NewTunnel(name string, local, server, remote string, pk string) error {
 	tn, err := d.mario.Establish(name, local, server, remote, pk)
@@ -236,14 +162,19 @@ func (d *Dashboard) UpTunnel(idOrName interface{}) (err error) {
 	return tn.Up()
 }
 
+func (d *Dashboard) GetTunnelConnections(idOrName interface{}) []*ssh.Connector {
+	tn := d.getTunnel(idOrName)
+	if tn == nil {
+		return nil
+	}
+	return tn.Connections()
+}
+
 
 func (d *Dashboard) formatTunnel(tn *TunnelInfo) string {
 	return strconv.Itoa(tn.GetID()) + "    " + tn.GetName() + "    " + tn.Represent()
 }
 
-func (d *Dashboard) SetInputAutoComplete(handler func (string) []string) {
-	d.inputView.SetAutocompleteFunc(handler)
-}
 
 func (d *Dashboard) GetTunnels() []*TunnelInfo {
 	if len(d.tunnels) == 0 {
@@ -256,20 +187,9 @@ func (d *Dashboard) GetTunnels() []*TunnelInfo {
 	return tns
 }
 
-func (d *Dashboard) Page(dir int)  {
-	if dir < 0 {
-		d.tnView.PrevPage()
-	} else {
-		d.tnView.NextPage()
-	}
-	d.Layout.Draw()
-}
 
 // debug purpose
 func (d *Dashboard) GetInput() <-chan string {
 	return d.input
 }
 
-func (d *Dashboard) MakeHistory(input string) {
-	d.history.Append(input)
-}
