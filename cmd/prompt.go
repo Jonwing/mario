@@ -527,6 +527,8 @@ func (i *interactiveCmd) buildCommands() {
 	}
 	openCmd.cmd.Run = openCmd.Run
 	openCmd.cmd.Flags().StringVarP(
+		&openCmd.tunnelName, "name", "n", "", "name of this tunnel")
+	openCmd.cmd.Flags().StringVarP(
 		&openCmd.link, "link", "l", "",
 		"composed format of the tunnel info. e.g. :1080:192.168.1.2:1080@user@host.com:22, " +
 			"this establishes a tunnel from local 1080 to remote 1080 of 192.168.1.2 " +
