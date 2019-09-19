@@ -61,7 +61,7 @@ type interactiveCmd struct {
 
 	exitParser *ExitParser
 
-	children []completeCmder
+	children []promptCommand
 
 }
 

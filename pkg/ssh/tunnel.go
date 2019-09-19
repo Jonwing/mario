@@ -54,6 +54,7 @@ func (c *Connector) ID() uint64 {
 	return c.counter
 }
 
+// this implements btree.Item interface so that we can put it into a btree
 func (c *Connector) Less(item btree.Item) bool {
 	other, ok := item.(*Connector)
 	if !ok {
@@ -62,15 +63,20 @@ func (c *Connector) Less(item btree.Item) bool {
 	return c.counter < other.counter
 }
 
+func (c *Connector) OpenedAt() time.Time {
+	return c.openedAt
+}
+
+// forwards packages between local connection and remote connection
 func (c *Connector) forward() error {
 	go c.localToRemote()
-	_, err := io.Copy(c.remoteConn, c.localConn)
+	_, err := io.Copy(c.localConn, c.remoteConn)
 	c.Close()
 	return err
 }
 
 func (c *Connector) localToRemote() {
-	_, err := io.Copy(c.localConn, c.remoteConn)
+	_, err := io.Copy(c.remoteConn, c.localConn)
 	if err != nil {
 		c.Close()
 	}

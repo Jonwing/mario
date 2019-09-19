@@ -18,20 +18,29 @@ import (
 )
 
 
-type completeFunc func(cmd completeCmder, args []string, current string) []prompt.Suggest
+type completeFunc func(cmd promptCommand, args []string, current string) []prompt.Suggest
 
 
-type completeCmder interface {
+type promptCommand interface {
+	// returns the name of this command
 	Name() string
 
+	// GetCmd returns the actual cobra.Command
 	GetCmd() *cobra.Command
 
+	// Complete is responsible for returning autocomplete suggestions for given
+	// input, args is a slice of words which is input separated by space, `current`
+	// is the word to be completed.
 	Complete(args []string, current string) []prompt.Suggest
 
-	Children() []completeCmder
+	// Children returns children commands of this command, if any
+	Children() []promptCommand
 
-	AddChildren(cmd ...completeCmder)
+	// add child command to this command
+	AddChildren(cmd ...promptCommand)
 
+	// clear command flag values. The command might be used multiple times, so that if there
+	// are flags, they should be reset to default state to avoid accessing flags of last run unexpectedly
 	ClearFlags()
 }
 
@@ -55,11 +64,11 @@ func (i *interactiveCmd) Complete(args []string, current string) []prompt.Sugges
 	return prompt.FilterHasPrefix(children, current, true)
 }
 
-func (i *interactiveCmd) Children() []completeCmder {
+func (i *interactiveCmd) Children() []promptCommand {
 	return i.children
 }
 
-func (i *interactiveCmd) AddChildren(cmd ...completeCmder) {
+func (i *interactiveCmd) AddChildren(cmd ...promptCommand) {
 	for _, c := range cmd {
 		i.children = append(i.children, c)
 		i.command.AddCommand(c.GetCmd())
@@ -111,7 +120,7 @@ func (i *interactiveCmd) complete(d prompt.Document) (suggest []prompt.Suggest){
 		}
 	}
 
-	current := completeCmder(i)
+	current := promptCommand(i)
 	for i := range args {
 		c := getChildCommand(current, args[i])
 		if c != nil {
@@ -133,7 +142,7 @@ type command struct {
 
 	completer completeFunc
 
-	children []completeCmder
+	children []promptCommand
 }
 
 // setRoot all commands are child commands of the root
@@ -156,11 +165,11 @@ func (c *command) Complete(args []string, current string) []prompt.Suggest {
 	return c.completer(c, args, current)
 }
 
-func (c *command) Children() []completeCmder {
+func (c *command) Children() []promptCommand {
 	return c.children
 }
 
-func (c *command) AddChildren(cmd ...completeCmder) {
+func (c *command) AddChildren(cmd ...promptCommand) {
 	c.children = append(c.children, cmd...)
 }
 
@@ -471,7 +480,7 @@ func NewCommand(name, short, long string, completer completeFunc, runner func(*c
 			Long: long,
 		},
 		completer: completer,
-		children:  make([]completeCmder, 0),
+		children:  make([]promptCommand, 0),
 	}
 }
 
@@ -486,12 +495,12 @@ func builtinCommand(root *interactiveCmd, name, short, long string, completer co
 			Run: runner,
 		},
 		completer: completer,
-		children:  make([]completeCmder, 0),
+		children:  make([]promptCommand, 0),
 	}
 }
 
 
-func getChildCommand(cmd completeCmder, name string) completeCmder {
+func getChildCommand(cmd promptCommand, name string) promptCommand {
 	for _, c := range cmd.Children() {
 		if c.Name() == name {
 			return c
@@ -511,7 +520,7 @@ func (i *interactiveCmd) buildCommands() {
 			Run: i.listTunnels,
 		},
 		completer: nil,
-		children:  make([]completeCmder, 0),
+		children:  make([]promptCommand, 0),
 	}
 
 	openCmd := &openCommand{
@@ -522,7 +531,7 @@ func (i *interactiveCmd) buildCommands() {
 				Use: 	"open",
 				Short:	"establish a tunnel",
 			},
-			children:  make([]completeCmder, 0),
+			children:  make([]promptCommand, 0),
 		},
 	}
 	openCmd.cmd.Run = openCmd.Run
@@ -530,18 +539,16 @@ func (i *interactiveCmd) buildCommands() {
 		&openCmd.tunnelName, "name", "n", "", "name of this tunnel")
 	openCmd.cmd.Flags().StringVarP(
 		&openCmd.link, "link", "l", "",
-		"composed format of the tunnel info. e.g. :1080:192.168.1.2:1080@user@host.com:22, " +
-			"this establishes a tunnel from local 1080 to remote 1080 of 192.168.1.2 " +
-			"in the network of ssh server user@host.com, ssh local 22")
+		"tunnel info, format: <local>:<remote>@<user>@<ssh_server>. e.g. :1080:192.168.1.2:1080@user@host.com:22 ")
 	openCmd.cmd.Flags().StringVar(&openCmd.local, "local",
-		":8080", "local local of the tunnel to listen")
+		":8080", "local address of the tunnel to listen")
 	openCmd.cmd.Flags().StringVarP(&openCmd.server, "server", "s", "",
-		"the ssh server address of this tunnel, e.g. user@host.com:22, " +
+		"ssh server address of this tunnel, e.g. user@host.com:22, " +
 			"if local not specified, the default local 22 will be used.")
 	openCmd.cmd.Flags().StringVarP(&openCmd.remote, "remote", "r", "",
-		"the remote endpoint of the tunnel. e.g. 192.168.1.2:1080")
+		"remote address of the tunnel. e.g. 192.168.1.2:1080")
 	openCmd.cmd.Flags().StringVarP(&openCmd.pk, "key", "k", "",
-		"the ssh private key file path, if not provided, the global key path will be used")
+		"ssh private key file path, if not provided, the global key path will be used")
 
 	closeCmd := &closeOrUpCommand{
 		command:    command{
@@ -551,7 +558,7 @@ func (i *interactiveCmd) buildCommands() {
 				Use:	"close",
 				Short:	"close a tunnel",
 			},
-			children:  make([]completeCmder, 0),
+			children:  make([]promptCommand, 0),
 		},
 	}
 	closeCmd.cmd.Run = closeCmd.Run
@@ -565,7 +572,7 @@ func (i *interactiveCmd) buildCommands() {
 				Use:	"up",
 				Short:	"refresh a tunnel",
 			},
-			children:  make([]completeCmder, 0),
+			children:  make([]promptCommand, 0),
 		},
 	}
 	upCmd.cmd.Run = upCmd.Run
@@ -579,12 +586,12 @@ func (i *interactiveCmd) buildCommands() {
 				Use:	"save",
 				Short:	"save tunnels to disk",
 			},
-			children:  make([]completeCmder, 0),
+			children:  make([]promptCommand, 0),
 		},
 	}
 	saveCmd.cmd.Run = saveCmd.Run
 	saveCmd.cmd.Flags().StringVarP(&saveCmd.output, "output", "o", "",
-		"the output file path to save tunnels information")
+		"output file path to save tunnels information")
 
 	helpCmd := &command{
 		root:      i,
@@ -597,7 +604,7 @@ func (i *interactiveCmd) buildCommands() {
 			},
 			Hidden:	true,
 		},
-		children:  make([]completeCmder, 0),
+		children:  make([]promptCommand, 0),
 	}
 
 
@@ -613,7 +620,7 @@ func (i *interactiveCmd) buildCommands() {
 			},
 		},
 		completer: nil,
-		children:  make([]completeCmder, 0),
+		children:  make([]promptCommand, 0),
 	}
 
 	viewCmd := &connectionCommand{
@@ -624,7 +631,7 @@ func (i *interactiveCmd) buildCommands() {
 				Use:	"view",
 				Short:	"list connections of a tunnel",
 			},
-			children:  make([]completeCmder, 0),
+			children:  make([]promptCommand, 0),
 		},
 		table: tablewriter.NewWriter(os.Stdout),
 	}
@@ -652,7 +659,8 @@ func flagHasPrefix(w string, filterTo *[]prompt.Suggest) func(flag *pflag.Flag) 
 }
 
 
-
+// ExitParser modifies the original parser to provide an ability to exit directly(return
+// from `Run` method of a Prompt), while the original way is to press Control+D.
 type ExitParser struct {
 	*prompt.PosixParser
 

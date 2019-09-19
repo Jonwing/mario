@@ -42,7 +42,7 @@ func TestTunnel_Up(t *testing.T) {
 	go func() {
 		tn.Up()
 	}()
-	defer tn.Down()
+	defer tn.Down(false)
 	time.Sleep(time.Second)
 	conn, err := net.Dial("tcp", local)
 	if err != nil {

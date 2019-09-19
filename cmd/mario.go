@@ -26,9 +26,6 @@ type baseCommand struct {
 	// interval to check whether tunnel is alive, default to 15 seconds, unit: second
 	heartbeatInterval int
 
-	// runs in background, without terminal UI
-	bg bool
-
 	// Debug if true, logs the debug logs
 	debug bool
 }
@@ -81,18 +78,16 @@ func (b *baseCommand) runDefault(cmd *cobra.Command, args []string) error {
 			return err
 		}
 	}
-	// TODO: if bg is true
+
 	tCmd := NewInteractiveCommand(dashBoard)
 
+	// establish tunnels fo existed config
 	go func() {
 		for _, cfg := range configs.Tunnels {
 			dashBoard.NewTunnel(cfg.Name, cfg.Local, cfg.SshServer, cfg.MapTo, cfg.PrivateKey)
-			// if err != nil {
-			// 	logrus.WithError(err).Errorf(
-			// 		"Open tunnel failed. local: %d, server: %s, remote: %s", cfg.Local, cfg.SshServer, cfg.MapTo)
-			// }
 		}
 	}()
+
 	err := dashBoard.Work()
 	if err != nil {
 		return err

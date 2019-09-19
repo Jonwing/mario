@@ -66,11 +66,6 @@ func (d *Dashboard) Work() error {
 	}
 	go func() {
 		for t := range tn {
-			// st := t.GetStatus()
-			// if err := t.Error(); err != nil && st != status[ssh.StatusClosed] && st != status[ssh.StatusListeningErr] {
-			// 	logrus.Errorf(
-			// 		"[Error] Tunnel <%d> (%s) raised an error: %s\n", t.GetID(), t.GetName(), t.Error())
-			// }
 			d.tunnelRecv <- t
 		}
 	}()
@@ -80,8 +75,7 @@ func (d *Dashboard) Work() error {
 
 func (d *Dashboard) Quit() {
 	d.mario.Stop()
-	logrus.Infoln("Bye.")
-	// time.Sleep(2*time.Second)
+	fmt.Println("Bye.")
 }
 
 func DefaultDashboard(pk string, log logger) *Dashboard {
