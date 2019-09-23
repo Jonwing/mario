@@ -125,8 +125,6 @@ func BuildCommand() *baseCommand {
 	b.cmd.PersistentFlags().IntVar(
 		&b.heartbeatInterval, "i", 15, "i(interval): the check-alive interval of a tunnel in second")
 	b.cmd.PersistentFlags().BoolVarP(
-		&b.bg, "detach", "d", false, "d(detach): run mario in background")
-	b.cmd.PersistentFlags().BoolVarP(
 		&b.debug, "debug", "v", false, "(v)verbose: logs the debug info")
 	return b
 }
