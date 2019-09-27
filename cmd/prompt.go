@@ -272,8 +272,10 @@ func (o *openCommand) Run(cmd *cobra.Command, args []string) {
 
 // closeOrUpCommand is responsible for close or reopen a ssh tunnel
 // usage:
+// 		close
 // 		close <tunnel_id>
 // 		close --name tunnel_name
+// 		up
 // 		up <tunnel_id>
 // 		up --name tunnel_name
 type closeOrUpCommand struct {
@@ -315,16 +317,23 @@ func (c *closeOrUpCommand) Complete(args []string, word string) []prompt.Suggest
 }
 
 func (c *closeOrUpCommand) Run(cmd *cobra.Command, args []string) {
-	if len(args) == 0 && c.tunnelName == "" {
-		logrus.Errorln("specify tunnel id or tunnel name")
-		return
-	}
 	var method func(interface{}) error
 	var err error
 	if c.name == "close" {
 		method = c.root.dashboard.CloseTunnel
 	} else {
 		method = c.root.dashboard.UpTunnel
+	}
+
+	if len(args) == 0 && c.tunnelName == "" {
+		for _, tn := range c.root.dashboard.GetTunnels() {
+			err := method(tn.GetID())
+			if err != nil {
+				logrus.Errorf(
+					"Failed to %s tunnel %d because of %s", c.name, tn.GetID(), err.Error())
+			}
+		}
+		return
 	}
 	if len(args) > 0 {
 		id, err := strconv.Atoi(args[0])
