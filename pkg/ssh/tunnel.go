@@ -163,15 +163,19 @@ func (t *Tunnel) forceConnect() error {
 	}
 	t.setStatusError(StatusConnecting, nil)
 	var err error
-	t.sshClient, err = sh.Dial("tcp", t.SSHUri, t.sshConfig)
-	if err != nil {
-		return err
-	}
 
-	t.listener, err = net.Listen("tcp", t.Local)
+	client, err := sh.Dial("tcp", t.SSHUri, t.sshConfig)
 	if err != nil {
 		return err
 	}
+	t.sshClient = client
+
+	listener, err := net.Listen("tcp", t.Local)
+	if err != nil {
+		return err
+	}
+	t.listener = listener
+	
 	t.setStatusError(StatusConnected, nil)
 	go t.listenLocal()
 	return nil
