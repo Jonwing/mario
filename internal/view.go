@@ -12,7 +12,7 @@ import (
 
 type sortTnBy struct {
 	tns []*TunnelInfo
-	by func(i, j *TunnelInfo) bool
+	by  func(i, j *TunnelInfo) bool
 }
 
 func (t *sortTnBy) Len() int {
@@ -80,15 +80,14 @@ func (d *Dashboard) Quit() {
 
 func DefaultDashboard(pk string, log logger) *Dashboard {
 	d := &Dashboard{
-		tunnels: make([]*TunnelInfo, 0),
+		tunnels:    make([]*TunnelInfo, 0),
 		tunnelRecv: make(chan *TunnelInfo, 16),
-		input:     make(chan string),
-		mario:	   NewMario(pk, 15*time.Second, log),
+		input:      make(chan string),
+		mario:      NewMario(pk, 15*time.Second, log),
 	}
 
 	return d
 }
-
 
 func (d *Dashboard) updateTunnelInfo() {
 	for tn := range d.tunnelRecv {
@@ -108,7 +107,6 @@ func (d *Dashboard) updateTunnelInfo() {
 func (d *Dashboard) Update(tn *TunnelInfo) {
 	d.tunnelRecv <- tn
 }
-
 
 func (d *Dashboard) NewTunnel(name string, local, server, remote string, pk string) error {
 	tn, err := d.mario.Establish(name, local, server, remote, pk)
@@ -145,7 +143,7 @@ func (d *Dashboard) CloseTunnel(idOrName interface{}) (err error) {
 	if tn == nil {
 		return errors.New(fmt.Sprintf("tunnel with id or name %s not found", idOrName))
 	}
-	return tn.Close()
+	return tn.Close(true)
 }
 
 func (d *Dashboard) UpTunnel(idOrName interface{}) (err error) {
@@ -153,7 +151,7 @@ func (d *Dashboard) UpTunnel(idOrName interface{}) (err error) {
 	if tn == nil {
 		return errors.New(fmt.Sprintf("tunnel with id or name %s not found", idOrName))
 	}
-	return tn.Up()
+	return tn.Up(false)
 }
 
 func (d *Dashboard) GetTunnelConnections(idOrName interface{}) []*ssh.Connector {
@@ -164,11 +162,9 @@ func (d *Dashboard) GetTunnelConnections(idOrName interface{}) []*ssh.Connector 
 	return tn.Connections()
 }
 
-
 func (d *Dashboard) formatTunnel(tn *TunnelInfo) string {
 	return strconv.Itoa(tn.GetID()) + "    " + tn.GetName() + "    " + tn.Represent()
 }
-
 
 func (d *Dashboard) GetTunnels() []*TunnelInfo {
 	if len(d.tunnels) == 0 {
@@ -181,9 +177,7 @@ func (d *Dashboard) GetTunnels() []*TunnelInfo {
 	return tns
 }
 
-
 // debug purpose
 func (d *Dashboard) GetInput() <-chan string {
 	return d.input
 }
-

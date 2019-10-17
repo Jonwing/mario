@@ -19,33 +19,40 @@ const (
 	actReconnect
 )
 
-
 var status = map[ssh.TunnelStatus]string{
-	ssh.StatusNew: "new",
-	ssh.StatusConnecting: "connecting",
-	ssh.StatusConnected: "connected",
-	ssh.StatusConnectFailed: "connect failed",
-	ssh.StatusClosed: "closed",
+	ssh.StatusNew:          "new",
+	ssh.StatusConnecting:   "connecting",
+	ssh.StatusConnected:    "connected",
+	ssh.StatusClosed:       "closed",
 	ssh.StatusReconnecting: "reconnecting",
-	ssh.StatusLost: "lost",
-	ssh.StatusWorkError: "error",
-	ssh.StatusListeningErr: "listening error",
+	ssh.StatusError:        "error",
 }
 
 type act int
 
 type tnAction struct {
 	act act
-	tn *TunnelInfo
+	tn  *TunnelInfo
+	err chan error
 }
 
+func newAction(tn *TunnelInfo, action act, errBack bool) *tnAction {
+	a := &tnAction{
+		act: action,
+		tn:  tn,
+	}
+	if errBack {
+		a.err = make(chan error)
+	}
+	return a
+}
 
 type TunnelInfo struct {
-	t *ssh.Tunnel
-	id int
-	name string
+	t          *ssh.Tunnel
+	id         int
+	name       string
 	privateKey string
-	mario *Mario
+	mario      *Mario
 }
 
 func (t *TunnelInfo) GetID() int {
@@ -73,7 +80,10 @@ func (t *TunnelInfo) GetRemote() string {
 }
 
 func (t *TunnelInfo) GetStatus() string {
-	st, ok := status[t.t.Status]
+	st, ok := status[t.t.Status()]
+	if t.t.Error() != nil {
+		return "error"
+	}
 	if !ok {
 		return "unknown"
 	}
@@ -88,18 +98,17 @@ func (t *TunnelInfo) Error() error {
 	return t.t.Error()
 }
 
-func (t *TunnelInfo) Close() error {
-	return t.mario.Close(t)
+func (t *TunnelInfo) Close(waitDone bool) error {
+	return t.mario.Close(t, waitDone)
 }
 
-func (t *TunnelInfo) Up() error {
-	return t.mario.Up(t)
+func (t *TunnelInfo) Up(waitDone bool) error {
+	return t.mario.Up(t, waitDone)
 }
 
 func (t *TunnelInfo) Connections() []*ssh.Connector {
 	return t.t.GetConnectors()
 }
-
 
 type logger interface {
 	Debugf(format string, args ...interface{})
@@ -143,7 +152,7 @@ func (m *Mario) wrap(t *ssh.Tunnel) *TunnelInfo {
 	return &TunnelInfo{id: int(id), t: t, name: strconv.Itoa(int(id)), mario: m}
 }
 
-func (m *Mario) Establish(name string, local, server, remote string, pk string) (*TunnelInfo, error){
+func (m *Mario) Establish(name string, local, server, remote string, pk string) (*TunnelInfo, error) {
 	var key *bytes.Buffer
 	if pk == "" {
 		if m.keyBuf == nil {
@@ -162,7 +171,7 @@ func (m *Mario) Establish(name string, local, server, remote string, pk string) 
 		key = bytes.NewBuffer(keyBytes)
 	}
 
-	tn, err := ssh.NewTunnel(local, server, remote, key, m.handleTunnel)
+	tn, err := ssh.NewTunnel(local, server, remote, key, m.handleTunnel, m.CheckAliveInterval)
 	if err != nil {
 		return nil, err
 	}
@@ -183,24 +192,28 @@ func (m *Mario) Establish(name string, local, server, remote string, pk string) 
 	return tw, nil
 }
 
-func (m *Mario) Up(tn *TunnelInfo) (err error) {
-	if tn.t.Status != ssh.StatusLost && tn.t.Status != ssh.StatusClosed {
+func (m *Mario) Up(tn *TunnelInfo, waitDone bool) (err error) {
+	if tn.t.Status() == ssh.StatusConnected {
 		return
 	}
-	m.actions <- &tnAction{tn:tn, act:actReconnect}
+	at := newAction(tn, actReconnect, waitDone)
+	m.actions <- at
+	if waitDone {
+		return <-at.err
+	}
 	return nil
 }
 
-func (m *Mario) Close(tn *TunnelInfo) (err error) {
-	m.actions <- &tnAction{
-		act: actClose,
-		tn:  tn,
+func (m *Mario) Close(tn *TunnelInfo, waitDone bool) (err error) {
+	at := newAction(tn, actClose, waitDone)
+	m.actions <- at
+	if waitDone {
+		return <-at.err
 	}
 	return nil
 }
 
 func (m *Mario) Monitor() (<-chan *TunnelInfo, error) {
-	ticker := time.NewTicker(m.CheckAliveInterval)
 	keyFile, err := ioutil.ReadFile(m.KeyPath)
 	if err != nil {
 		return nil, err
@@ -214,9 +227,19 @@ func (m *Mario) Monitor() (<-chan *TunnelInfo, error) {
 				case actOpen:
 					m.wrappers[action.tn.t] = action.tn
 				case actClose:
-					action.tn.t.Down(false)
+					if action.err == nil {
+						action.tn.t.Down(false)
+					} else {
+						action.tn.t.Down(true)
+						action.err <- nil
+					}
 				case actReconnect:
-					go action.tn.t.Reconnect()
+					if action.err == nil {
+						action.tn.t.Reconnect(false)
+					} else {
+						action.tn.t.Reconnect(true)
+						action.err <- nil
+					}
 				}
 			case raw := <-m.updatedTunnels:
 				m.wm.RLock()
@@ -230,10 +253,6 @@ func (m *Mario) Monitor() (<-chan *TunnelInfo, error) {
 					m.wm.Unlock()
 				}
 				m.publishWrapper <- wrapped
-			case <-ticker.C:
-				for t := range m.wrappers {
-					go t.KeepAlive()
-				}
 			case <-m.stop:
 				break
 			}
@@ -250,10 +269,9 @@ func (m *Mario) Stop() {
 	}
 }
 
-
 func NewMario(pkPath string, heartbeat time.Duration, logger logger) *Mario {
 	if heartbeat < 30*time.Second {
-		heartbeat = 30*time.Second
+		heartbeat = 30 * time.Second
 	}
 	if pkPath == "" {
 		u, err := user.Current()
@@ -265,9 +283,9 @@ func NewMario(pkPath string, heartbeat time.Duration, logger logger) *Mario {
 		tunnelCount:        0,
 		CheckAliveInterval: heartbeat,
 		KeyPath:            pkPath,
-		actions: 			make(chan *tnAction, 16),
+		actions:            make(chan *tnAction, 16),
 		updatedTunnels:     make(chan *ssh.Tunnel, 32),
-		publishWrapper:		make(chan *TunnelInfo, 32),
+		publishWrapper:     make(chan *TunnelInfo, 32),
 		logger:             logger,
 		wrappers:           make(map[*ssh.Tunnel]*TunnelInfo),
 		wm:                 sync.RWMutex{},
@@ -275,4 +293,3 @@ func NewMario(pkPath string, heartbeat time.Duration, logger logger) *Mario {
 	}
 	return m
 }
-
