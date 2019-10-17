@@ -138,20 +138,33 @@ func (d *Dashboard) getTunnel(idOrName interface{}) (tn *TunnelInfo) {
 	return
 }
 
-func (d *Dashboard) CloseTunnel(idOrName interface{}) (err error) {
+func (d *Dashboard) CloseTunnel(idOrName interface{}, waitDone bool) (err error) {
+	if tid, ok := idOrName.(int); ok && tid == -1 {
+		d.mario.ApplyAll(actClose, waitDone)
+		return nil
+	}
 	tn := d.getTunnel(idOrName)
 	if tn == nil {
 		return errors.New(fmt.Sprintf("tunnel with id or name %s not found", idOrName))
 	}
-	return tn.Close(true)
+	waiting := make(chan error, 1)
+	d.mario.Close(tn, waiting)
+	return <-waiting
 }
 
-func (d *Dashboard) UpTunnel(idOrName interface{}) (err error) {
+func (d *Dashboard) UpTunnel(idOrName interface{}, waitDone bool) (err error) {
+	if tid, ok := idOrName.(int); ok && tid == -1 {
+		d.mario.ApplyAll(actReconnect, waitDone)
+		return nil
+	}
 	tn := d.getTunnel(idOrName)
 	if tn == nil {
 		return errors.New(fmt.Sprintf("tunnel with id or name %s not found", idOrName))
 	}
-	return tn.Up(false)
+	waiting := make(chan error, 1)
+	d.mario.Up(tn, waiting)
+
+	return <-waiting
 }
 
 func (d *Dashboard) GetTunnelConnections(idOrName interface{}) []*ssh.Connector {

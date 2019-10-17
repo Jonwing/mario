@@ -17,9 +17,7 @@ import (
 	"sync/atomic"
 )
 
-
 type completeFunc func(cmd promptCommand, args []string, current string) []prompt.Suggest
-
 
 type promptCommand interface {
 	// returns the name of this command
@@ -86,7 +84,6 @@ func (i *interactiveCmd) ClearFlags() {
 	}
 }
 
-
 func (i *interactiveCmd) runCommand(txt string) {
 	txt = strings.TrimSpace(txt)
 	if txt == "" {
@@ -103,16 +100,15 @@ func (i *interactiveCmd) runCommand(txt string) {
 	}
 }
 
-
-func (i *interactiveCmd) complete(d prompt.Document) (suggest []prompt.Suggest){
+func (i *interactiveCmd) complete(d prompt.Document) (suggest []prompt.Suggest) {
 	txt := d.TextBeforeCursor()
 	w := d.GetWordBeforeCursor()
 	if txt == "" {
 		return
 	}
-	
+
 	args := strings.Split(spacePtn.ReplaceAllString(txt, " "), " ")
-	
+
 	// If PIPE is in text before the cursor, returns empty suggestions.
 	for i := range args {
 		if args[i] == "|" {
@@ -129,7 +125,6 @@ func (i *interactiveCmd) complete(d prompt.Document) (suggest []prompt.Suggest){
 	}
 	return current.Complete(args, w)
 }
-
 
 // command common hierarchical command with suggestion prompting,
 // combines cobra.Command and go-prompt
@@ -182,6 +177,47 @@ func (c *command) ClearFlags() {
 	if err != nil {
 		fmt.Printf("error clearing help flag: %s\n", err.Error())
 	}
+}
+
+// listCommand list the current state of all tunnels to output
+type listCommand struct {
+	command
+
+	table *tablewriter.Table
+}
+
+func (l *listCommand) Run(cmd *cobra.Command, args []string) {
+	l.table.ClearRows()
+	tns := l.root.dashboard.GetTunnels()
+	rows := make([][]string, len(tns))
+	for i, tn := range tns {
+		var errStr string
+		if tn.Error() != nil {
+			errStr = tn.Error().Error()
+		}
+		rows[i] = []string{strconv.Itoa(tn.GetID()), tn.GetName(), tn.GetStatus(), tn.Represent(), errStr}
+	}
+	l.table.AppendBulk(rows)
+	l.table.Render()
+}
+
+func NewListCommand(root *interactiveCmd) *listCommand {
+	l := &listCommand{
+		command: command{
+			root: root,
+			name: "list",
+			cmd: &cobra.Command{
+				Use:   "list",
+				Short: "list all tunnels",
+			},
+			completer: nil,
+			children:  make([]promptCommand, 0),
+		},
+		table: tablewriter.NewWriter(os.Stdout),
+	}
+	l.table.SetHeader([]string{"id", "name", "status", "link", "remark"})
+	l.table.SetRowLine(false)
+	return l
 }
 
 // openCommand is responsible for establishing a new SSH tunnel
@@ -269,7 +305,6 @@ func (o *openCommand) Run(cmd *cobra.Command, args []string) {
 	}
 }
 
-
 // closeOrUpCommand is responsible for close or reopen a ssh tunnel
 // usage:
 // 		close
@@ -282,9 +317,11 @@ type closeOrUpCommand struct {
 	command
 
 	tunnelName string
+
+	listCmd *listCommand
 }
 
-func (c *closeOrUpCommand)  ClearFlags() {
+func (c *closeOrUpCommand) ClearFlags() {
 	c.command.ClearFlags()
 	c.tunnelName = ""
 }
@@ -297,10 +334,10 @@ func (c *closeOrUpCommand) Complete(args []string, word string) []prompt.Suggest
 		return suggests
 	}
 	// if the last part of the command is "--name" or "-n", return the tunnel list
- 	if len(args) > 2 && (args[len(args)-2] == "--name" || args[len(args)-2] == "-n") {
+	if len(args) > 2 && (args[len(args)-2] == "--name" || args[len(args)-2] == "-n") {
 		for _, tn := range c.root.dashboard.GetTunnels() {
 			suggests = append(suggests, prompt.Suggest{
-				Text: 		 tn.GetName(),
+				Text:        tn.GetName(),
 				Description: "ID: " + strconv.Itoa(tn.GetID()) + "(" + tn.GetStatus() + ")",
 			})
 		}
@@ -309,7 +346,7 @@ func (c *closeOrUpCommand) Complete(args []string, word string) []prompt.Suggest
 
 	for _, tn := range c.root.dashboard.GetTunnels() {
 		suggests = append(suggests, prompt.Suggest{
-			Text: 		 strconv.Itoa(tn.GetID()),
+			Text:        strconv.Itoa(tn.GetID()),
 			Description: tn.GetName() + "(" + tn.GetStatus() + ")",
 		})
 	}
@@ -317,39 +354,36 @@ func (c *closeOrUpCommand) Complete(args []string, word string) []prompt.Suggest
 }
 
 func (c *closeOrUpCommand) Run(cmd *cobra.Command, args []string) {
-	var method func(interface{}) error
+	var method func(interface{}, bool) error
 	var err error
 	if c.name == "close" {
 		method = c.root.dashboard.CloseTunnel
 	} else {
 		method = c.root.dashboard.UpTunnel
 	}
-
 	if len(args) == 0 && c.tunnelName == "" {
-		for _, tn := range c.root.dashboard.GetTunnels() {
-			err := method(tn.GetID())
-			if err != nil {
-				logrus.Errorf(
-					"Failed to %s tunnel %d because of %s", c.name, tn.GetID(), err.Error())
-			}
-		}
+		_ = method(-1, true)
+		c.listCmd.Run(nil, nil)
 		return
 	}
 	if len(args) > 0 {
-		id, err := strconv.Atoi(args[0])
-		if err != nil {
-			logrus.Errorln("id should be a number", args[0])
-			return
+		for _, str := range args {
+			id, err := strconv.Atoi(str)
+			if err != nil {
+				logrus.Errorln("id should be a number", args[0])
+				return
+			}
+			err = method(id, true)
 		}
 		// close tunnel with id
-		err = method(id)
 	} else {
-		err = method(c.tunnelName)
+		err = method(c.tunnelName, true)
 	}
 
 	if err != nil {
 		logrus.Errorln(c.name, "failed: ", err.Error())
 	}
+	c.listCmd.Run(nil, nil)
 }
 
 // saveCommand saves all the ssh tunnels that mario holds to disk for next time usage
@@ -389,7 +423,7 @@ func (s *saveCommand) Run(cmd *cobra.Command, args []string) {
 		configs = append(configs, cfg)
 	}
 
-	tnConfig := &tConfigs{Tunnels:configs}
+	tnConfig := &tConfigs{Tunnels: configs}
 	if s.output == "" {
 		s.output = path.Join(GetUserHome(), "tunnels.json")
 	}
@@ -405,8 +439,7 @@ func (s *saveCommand) Run(cmd *cobra.Command, args []string) {
 	}
 }
 
-
-type connectionCommand struct {
+type viewCommand struct {
 	command
 
 	tunnelName string
@@ -414,12 +447,12 @@ type connectionCommand struct {
 	table *tablewriter.Table
 }
 
-func (c *connectionCommand) ClearFlags() {
+func (c *viewCommand) ClearFlags() {
 	c.command.ClearFlags()
 	c.tunnelName = ""
 }
 
-func (c *connectionCommand) Complete(args []string, word string) []prompt.Suggest {
+func (c *viewCommand) Complete(args []string, word string) []prompt.Suggest {
 	// if  starts with -- ,  returns the flags
 	suggests := make([]prompt.Suggest, 0)
 	if strings.HasPrefix(word, "--") {
@@ -430,7 +463,7 @@ func (c *connectionCommand) Complete(args []string, word string) []prompt.Sugges
 	if len(args) > 2 && (args[len(args)-2] == "--name" || args[len(args)-2] == "-n") {
 		for _, tn := range c.root.dashboard.GetTunnels() {
 			suggests = append(suggests, prompt.Suggest{
-				Text: 		 tn.GetName(),
+				Text:        tn.GetName(),
 				Description: "ID: " + strconv.Itoa(tn.GetID()) + "(" + tn.GetStatus() + ")",
 			})
 		}
@@ -439,14 +472,14 @@ func (c *connectionCommand) Complete(args []string, word string) []prompt.Sugges
 
 	for _, tn := range c.root.dashboard.GetTunnels() {
 		suggests = append(suggests, prompt.Suggest{
-			Text: 		 strconv.Itoa(tn.GetID()),
+			Text:        strconv.Itoa(tn.GetID()),
 			Description: tn.GetName() + "(" + tn.GetStatus() + ")",
 		})
 	}
 	return prompt.FilterHasPrefix(suggests, word, true)
 }
 
-func (c *connectionCommand) Run(cmd *cobra.Command, args []string) {
+func (c *viewCommand) Run(cmd *cobra.Command, args []string) {
 	if len(args) == 0 && c.tunnelName == "" {
 		logrus.Errorln("specify tunnel id or tunnel name")
 		return
@@ -477,16 +510,14 @@ func (c *connectionCommand) Run(cmd *cobra.Command, args []string) {
 	c.table.Render()
 }
 
-
-
 func NewCommand(name, short, long string, completer completeFunc, runner func(*cobra.Command, []string)) *command {
 	return &command{
-		root:		nil,
-		name:      name,
-		cmd:       &cobra.Command{
-			Use: name,
+		root: nil,
+		name: name,
+		cmd: &cobra.Command{
+			Use:   name,
 			Short: short,
-			Long: long,
+			Long:  long,
 		},
 		completer: completer,
 		children:  make([]promptCommand, 0),
@@ -495,19 +526,18 @@ func NewCommand(name, short, long string, completer completeFunc, runner func(*c
 
 func builtinCommand(root *interactiveCmd, name, short, long string, completer completeFunc, runner func(*cobra.Command, []string)) *command {
 	return &command{
-		root:		root,
-		name:      name,
-		cmd:       &cobra.Command{
-			Use: name,
+		root: root,
+		name: name,
+		cmd: &cobra.Command{
+			Use:   name,
 			Short: short,
-			Long: long,
-			Run: runner,
+			Long:  long,
+			Run:   runner,
 		},
 		completer: completer,
 		children:  make([]promptCommand, 0),
 	}
 }
-
 
 func getChildCommand(cmd promptCommand, name string) promptCommand {
 	for _, c := range cmd.Children() {
@@ -518,29 +548,19 @@ func getChildCommand(cmd promptCommand, name string) promptCommand {
 	return nil
 }
 
-
 func (i *interactiveCmd) buildCommands() {
-	listCmd := &command{
-		root:      i,
-		name:      "list",
-		cmd:       &cobra.Command{
-			Use: "list",
-			Short: "list all tunnels",
-			Run: i.listTunnels,
-		},
-		completer: nil,
-		children:  make([]promptCommand, 0),
-	}
+	listCmd := NewListCommand(i)
+	listCmd.cmd.Run = listCmd.Run
 
 	openCmd := &openCommand{
 		command: command{
-			root:     	i,
-			name:      "open",
-			cmd:       &cobra.Command{
-				Use: 	"open",
-				Short:	"establish a tunnel",
+			root: i,
+			name: "open",
+			cmd: &cobra.Command{
+				Use:   "open",
+				Short: "establish a tunnel",
 			},
-			children:  make([]promptCommand, 0),
+			children: make([]promptCommand, 0),
 		},
 	}
 	openCmd.cmd.Run = openCmd.Run
@@ -552,7 +572,7 @@ func (i *interactiveCmd) buildCommands() {
 	openCmd.cmd.Flags().StringVar(&openCmd.local, "local",
 		":8080", "local address of the tunnel to listen")
 	openCmd.cmd.Flags().StringVarP(&openCmd.server, "server", "s", "",
-		"ssh server address of this tunnel, e.g. user@host.com:22, " +
+		"ssh server address of this tunnel, e.g. user@host.com:22, "+
 			"if local not specified, the default local 22 will be used.")
 	openCmd.cmd.Flags().StringVarP(&openCmd.remote, "remote", "r", "",
 		"remote address of the tunnel. e.g. 192.168.1.2:1080")
@@ -560,42 +580,45 @@ func (i *interactiveCmd) buildCommands() {
 		"ssh private key file path, if not provided, the global key path will be used")
 
 	closeCmd := &closeOrUpCommand{
-		command:    command{
+		command: command{
 			root: i,
 			name: "close",
 			cmd: &cobra.Command{
-				Use:	"close",
-				Short:	"close a tunnel",
+				Use:   "close",
+				Short: "close a tunnel",
 			},
-			children:  make([]promptCommand, 0),
+			children: make([]promptCommand, 0),
 		},
+		listCmd: listCmd,
 	}
 	closeCmd.cmd.Run = closeCmd.Run
 	closeCmd.cmd.Flags().StringVarP(&closeCmd.tunnelName, "name", "n", "", "specify tunnel name")
 
 	upCmd := &closeOrUpCommand{
-		command:    command{
+		command: command{
 			root: i,
 			name: "up",
 			cmd: &cobra.Command{
-				Use:	"up",
-				Short:	"refresh a tunnel",
+				Use:   "up",
+				Short: "refresh a tunnel",
 			},
-			children:  make([]promptCommand, 0),
+			children: make([]promptCommand, 0),
 		},
+		listCmd: listCmd,
 	}
 	upCmd.cmd.Run = upCmd.Run
-	upCmd.cmd.Flags().StringVarP(&upCmd.tunnelName, "name", "n", "", "specify tunnel name")
+	upCmd.cmd.Flags().StringVarP(
+		&upCmd.tunnelName, "name", "n", "", "specify tunnel name")
 
 	saveCmd := &saveCommand{
 		command: command{
-			root:	i,
-			name:	"save",
-			cmd:	&cobra.Command{
-				Use:	"save",
-				Short:	"save tunnels to disk",
+			root: i,
+			name: "save",
+			cmd: &cobra.Command{
+				Use:   "save",
+				Short: "save tunnels to disk",
 			},
-			children:  make([]promptCommand, 0),
+			children: make([]promptCommand, 0),
 		},
 	}
 	saveCmd.cmd.Run = saveCmd.Run
@@ -603,26 +626,25 @@ func (i *interactiveCmd) buildCommands() {
 		"output file path to save tunnels information")
 
 	helpCmd := &command{
-		root:      i,
-		name:      "help",
-		cmd:       &cobra.Command{
-			Use:	"help",
-			Short:	"print usage",
+		root: i,
+		name: "help",
+		cmd: &cobra.Command{
+			Use:   "help",
+			Short: "print usage",
 			Run: func(cmd *cobra.Command, args []string) {
-				i.command.Usage()
+				_ = i.command.Usage()
 			},
-			Hidden:	true,
+			Hidden: true,
 		},
-		children:  make([]promptCommand, 0),
+		children: make([]promptCommand, 0),
 	}
 
-
 	exit := &command{
-		root:      i,
-		name:      "exit",
-		cmd:       &cobra.Command{
-			Use:	"exit",
-			Short:	"exit mario",
+		root: i,
+		name: "exit",
+		cmd: &cobra.Command{
+			Use:   "exit",
+			Short: "exit mario",
 			Run: func(cmd *cobra.Command, args []string) {
 				i.dashboard.Quit()
 				i.exitParser.Exit()
@@ -632,15 +654,15 @@ func (i *interactiveCmd) buildCommands() {
 		children:  make([]promptCommand, 0),
 	}
 
-	viewCmd := &connectionCommand{
-		command:    command{
+	viewCmd := &viewCommand{
+		command: command{
 			root: i,
 			name: "view",
 			cmd: &cobra.Command{
-				Use:	"view",
-				Short:	"list connections of a tunnel",
+				Use:   "view",
+				Short: "list connections of a tunnel",
 			},
-			children:  make([]promptCommand, 0),
+			children: make([]promptCommand, 0),
 		},
 		table: tablewriter.NewWriter(os.Stdout),
 	}
@@ -649,12 +671,8 @@ func (i *interactiveCmd) buildCommands() {
 	viewCmd.cmd.Run = viewCmd.Run
 	viewCmd.cmd.Flags().StringVarP(&viewCmd.tunnelName, "name", "n", "", "specify tunnel name")
 
-
-
 	i.AddChildren(listCmd, openCmd, closeCmd, upCmd, saveCmd, helpCmd, viewCmd, exit)
 }
-
-
 
 func flagHasPrefix(w string, filterTo *[]prompt.Suggest) func(flag *pflag.Flag) {
 	return func(flag *pflag.Flag) {
@@ -666,7 +684,6 @@ func flagHasPrefix(w string, filterTo *[]prompt.Suggest) func(flag *pflag.Flag) 
 		}
 	}
 }
-
 
 // ExitParser modifies the original parser to provide an ability to exit directly(return
 // from `Run` method of a Prompt), while the original way is to press Control+D.
@@ -684,11 +701,9 @@ func (e *ExitParser) Read() ([]byte, error) {
 	return e.PosixParser.Read()
 }
 
-
 func (e *ExitParser) Exit() {
 	atomic.StoreUint32(&e.exit, 1)
 }
-
 
 func NewExitParser() *ExitParser {
 	return &ExitParser{

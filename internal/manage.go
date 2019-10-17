@@ -2,6 +2,7 @@ package internal
 
 import (
 	"bytes"
+	"errors"
 	"github.com/Jonwing/mario/pkg/ssh"
 	"github.com/sirupsen/logrus"
 	"io/ioutil"
@@ -36,13 +37,11 @@ type tnAction struct {
 	err chan error
 }
 
-func newAction(tn *TunnelInfo, action act, errBack bool) *tnAction {
+func newAction(tn *TunnelInfo, action act, errBack chan error) *tnAction {
 	a := &tnAction{
 		act: action,
 		tn:  tn,
-	}
-	if errBack {
-		a.err = make(chan error)
+		err: errBack,
 	}
 	return a
 }
@@ -98,12 +97,12 @@ func (t *TunnelInfo) Error() error {
 	return t.t.Error()
 }
 
-func (t *TunnelInfo) Close(waitDone bool) error {
-	return t.mario.Close(t, waitDone)
+func (t *TunnelInfo) Close(waitDone chan error) {
+	t.mario.Close(t, waitDone)
 }
 
-func (t *TunnelInfo) Up(waitDone bool) error {
-	return t.mario.Up(t, waitDone)
+func (t *TunnelInfo) Up(waitDone chan error) {
+	t.mario.Up(t, waitDone)
 }
 
 func (t *TunnelInfo) Connections() []*ssh.Connector {
@@ -192,25 +191,49 @@ func (m *Mario) Establish(name string, local, server, remote string, pk string) 
 	return tw, nil
 }
 
-func (m *Mario) Up(tn *TunnelInfo, waitDone bool) (err error) {
+func (m *Mario) Up(tn *TunnelInfo, waitDone chan error) {
+	if tn == nil {
+		waitDone <- errors.New("nil tn")
+		return
+	}
 	if tn.t.Status() == ssh.StatusConnected {
+		waitDone <- nil
 		return
 	}
 	at := newAction(tn, actReconnect, waitDone)
 	m.actions <- at
-	if waitDone {
-		return <-at.err
-	}
-	return nil
 }
 
-func (m *Mario) Close(tn *TunnelInfo, waitDone bool) (err error) {
+func (m *Mario) Close(tn *TunnelInfo, waitDone chan error) {
+	if tn == nil {
+		waitDone <- errors.New("nil tn")
+		return
+	}
 	at := newAction(tn, actClose, waitDone)
 	m.actions <- at
-	if waitDone {
-		return <-at.err
+}
+
+func (m *Mario) ApplyAll(action act, waitDone bool) {
+	m.wm.RLock()
+	waiting := make(chan error, len(m.wrappers))
+	for tn := range m.wrappers {
+		if action == actReconnect {
+			tn.Reconnect(waiting)
+		} else {
+			tn.Down(waiting)
+		}
 	}
-	return nil
+	m.wm.RUnlock()
+	if !waitDone {
+		return
+	}
+	count := 0
+	for range waiting {
+		count++
+		if count == len(m.wrappers) {
+			break
+		}
+	}
 }
 
 func (m *Mario) Monitor() (<-chan *TunnelInfo, error) {
@@ -227,19 +250,9 @@ func (m *Mario) Monitor() (<-chan *TunnelInfo, error) {
 				case actOpen:
 					m.wrappers[action.tn.t] = action.tn
 				case actClose:
-					if action.err == nil {
-						action.tn.t.Down(false)
-					} else {
-						action.tn.t.Down(true)
-						action.err <- nil
-					}
+					action.tn.t.Down(action.err)
 				case actReconnect:
-					if action.err == nil {
-						action.tn.t.Reconnect(false)
-					} else {
-						action.tn.t.Reconnect(true)
-						action.err <- nil
-					}
+					action.tn.t.Reconnect(action.err)
 				}
 			case raw := <-m.updatedTunnels:
 				m.wm.RLock()
@@ -264,8 +277,18 @@ func (m *Mario) Monitor() (<-chan *TunnelInfo, error) {
 func (m *Mario) Stop() {
 	logrus.Debugln("Mario stop")
 	m.stop <- struct{}{}
+	m.wm.RLock()
+	waiting := make(chan error, len(m.wrappers))
 	for tn := range m.wrappers {
-		tn.Down(true)
+		tn.Down(waiting)
+	}
+	m.wm.RUnlock()
+	count := 0
+	for range waiting {
+		count++
+		if count == len(m.wrappers) {
+			break
+		}
 	}
 }
 

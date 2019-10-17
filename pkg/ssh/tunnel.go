@@ -247,12 +247,7 @@ func (t *Tunnel) listenLocal() {
 	}
 }
 
-func (t *Tunnel) Down(waitDone bool) {
-	bufSize := 1
-	if waitDone {
-		bufSize = 0
-	}
-	ok := make(chan struct{}, bufSize)
+func (t *Tunnel) Down(waitDone chan<- error) {
 	t.works <- func() error {
 		t.connectors.Ascend(func(i btree.Item) bool {
 			cnt := i.(*Connector)
@@ -262,20 +257,16 @@ func (t *Tunnel) Down(waitDone bool) {
 		t.connectors.Clear(false)
 		t.setStatusError(StatusClosed, nil)
 		t.listener.Close()
-		ok <- struct{}{}
+		if waitDone != nil {
+			waitDone <- nil
+		}
 		return nil
 	}
-	<-ok
 }
 
 // the difference between Down() and Destroy() is that Destroy() exits the running
 // goroutine so that all subsequent works will failed, which making this tunnel unavailable
-func (t *Tunnel) Destroy(waitClose bool) {
-	bufSize := 1
-	if waitClose {
-		bufSize = 0
-	}
-	ok := make(chan struct{}, bufSize)
+func (t *Tunnel) Destroy(waitDone chan<- error) {
 	t.works <- func() error {
 		t.connectors.Ascend(func(i btree.Item) bool {
 			cnt := i.(*Connector)
@@ -285,24 +276,23 @@ func (t *Tunnel) Destroy(waitClose bool) {
 		t.connectors.Clear(false)
 		t.setStatusError(StatusRemoved, nil)
 		t.listener.Close()
-		ok <- struct{}{}
+		if waitDone != nil {
+			waitDone <- nil
+		}
 		return nil
 	}
-	<-ok
 }
 
-func (t *Tunnel) Reconnect(waitDone bool) {
-	if !waitDone {
+func (t *Tunnel) Reconnect(waitDone chan<- error) {
+	if waitDone == nil {
 		t.works <- t.forceConnect
 		return
 	}
-	ok := make(chan struct{})
 	t.works <- func() error {
 		_ = t.forceConnect()
-		ok <- struct{}{}
+		waitDone <- nil
 		return nil
 	}
-	<-ok
 }
 
 func (t *Tunnel) UpdateStatus(st TunnelStatus, err error) {

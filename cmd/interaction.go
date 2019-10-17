@@ -4,24 +4,11 @@ import (
 	"github.com/Jonwing/mario/internal"
 	"github.com/c-bata/go-prompt"
 	"github.com/c-bata/go-prompt/completer"
-	"github.com/olekukonko/tablewriter"
 	"github.com/spf13/cobra"
-	"os"
 	"regexp"
-	"strconv"
 )
 
-type action int
-
-const (
-	actionOpenTunnel = action(iota)
-	actionCloseTunnel
-	actionReconnect
-	actionSave
-	actionHelp
-)
-
-var	spacePtn = regexp.MustCompile(`\s+`)
+var spacePtn = regexp.MustCompile(`\s+`)
 
 type iArgs struct {
 	// name the tunnel name
@@ -57,24 +44,20 @@ type interactiveCmd struct {
 	// belows are members for prompt
 	pmt *prompt.Prompt
 
-	tw *tablewriter.Table
-
 	exitParser *ExitParser
 
 	children []promptCommand
-
 }
 
 func NewInteractiveCommand(dashboard *internal.Dashboard) *interactiveCmd {
 	it := &interactiveCmd{
-		dashboard:dashboard,
-		tw: tablewriter.NewWriter(os.Stdout),
+		dashboard: dashboard,
 	}
 	it.command = &cobra.Command{
-		Use: "[command]",
+		Use:   "[command]",
 		Short: "manage tunnels",
-		Long: "open, close and save tunnels",
-		Run: it.execute,
+		Long:  "open, close and save tunnels",
+		Run:   it.execute,
 	}
 
 	it.command.SetUsageTemplate(`mario helps you handle multiple SSH tunnels, you can open,
@@ -104,9 +87,6 @@ Additional help topics:{{range .Commands}}{{if .IsAdditionalHelpTopicCommand}}
 Use "[command] --help" for more information about a command.{{end}}
 `)
 
-	it.tw.SetHeader([]string{"id", "name", "status", "link", "remark"})
-	it.tw.SetRowLine(false)
-
 	it.exitParser = NewExitParser()
 
 	it.pmt = prompt.New(
@@ -125,7 +105,7 @@ Use "[command] --help" for more information about a command.{{end}}
 		prompt.OptionSelectedSuggestionBGColor(prompt.White),
 		prompt.OptionSelectedDescriptionTextColor(prompt.Black),
 		prompt.OptionSelectedDescriptionBGColor(prompt.DarkBlue),
-		)
+	)
 
 	it.command.PersistentFlags().StringVarP(&it.privateKeyPath, "key", "k", "",
 		"the ssh private key file path, if not provided, the global key path will be used")
@@ -140,24 +120,9 @@ func (i *interactiveCmd) RunCommand(args []string) (err error) {
 
 func (i *interactiveCmd) execute(cmd *cobra.Command, args []string) {
 	if len(args) < 1 {
-		i.command.Usage()
+		_ = i.command.Usage()
 		return
 	}
-}
-
-func (i *interactiveCmd) listTunnels(cmd *cobra.Command, args []string) {
-	i.tw.ClearRows()
-	tns := i.dashboard.GetTunnels()
-	rows := make([][]string, len(tns))
-	for i, tn := range tns {
-		var errStr string
-		if tn.Error() != nil {
-			errStr = tn.Error().Error()
-		}
-		rows[i] = []string{strconv.Itoa(tn.GetID()), tn.GetName(), tn.GetStatus(), tn.Represent(), errStr}
-	}
-	i.tw.AppendBulk(rows)
-	i.tw.Render()
 }
 
 func (i *interactiveCmd) Run() {

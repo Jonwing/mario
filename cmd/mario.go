@@ -13,7 +13,6 @@ import (
 	"runtime/pprof"
 )
 
-
 type baseCommand struct {
 	cmd *cobra.Command
 
@@ -29,7 +28,6 @@ type baseCommand struct {
 	// Debug if true, logs the debug logs
 	debug bool
 }
-
 
 func (b *baseCommand) getCommand() *cobra.Command {
 	return b.cmd
@@ -66,9 +64,9 @@ func (b *baseCommand) runDefault(cmd *cobra.Command, args []string) error {
 		logrus.SetLevel(logrus.InfoLevel)
 	}
 	// logrus.SetFormatter(&logrus.TextFormatter{})
-	configs := &tConfigs{Tunnels:make([]*tConfig, 0)}
+	configs := &tConfigs{Tunnels: make([]*tConfig, 0)}
 	// if we get a configPath, load the config
-	if b.configPath != ""{
+	if b.configPath != "" {
 		content, err := ioutil.ReadFile(b.configPath)
 		if err != nil {
 			return err
@@ -84,7 +82,7 @@ func (b *baseCommand) runDefault(cmd *cobra.Command, args []string) error {
 	// establish tunnels fo existed config
 	go func() {
 		for _, cfg := range configs.Tunnels {
-			dashBoard.NewTunnel(cfg.Name, cfg.Local, cfg.SshServer, cfg.MapTo, cfg.PrivateKey)
+			_ = dashBoard.NewTunnel(cfg.Name, cfg.Local, cfg.SshServer, cfg.MapTo, cfg.PrivateKey)
 		}
 	}()
 
@@ -92,7 +90,7 @@ func (b *baseCommand) runDefault(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return err
 	}
-	tCmd.command.Usage()
+	_ = tCmd.command.Usage()
 	tCmd.Run()
 	return nil
 }
@@ -104,16 +102,14 @@ func (b *baseCommand) Execute() {
 	}
 }
 
-
 func BuildCommand() *baseCommand {
 	b := &baseCommand{}
 	b.cmd = &cobra.Command{
-		Use:                        "mario [options] [flags]",
-		Short:                      "mario handles pipes(ssh tunnels) for you",
-		Long:                       "Manage ssh tunnels(establishing, closing, health check, reconnect...)",
-		RunE: 						b.runDefault,
+		Use:   "mario [options] [flags]",
+		Short: "mario handles pipes(ssh tunnels) for you",
+		Long:  "Manage ssh tunnels(establishing, closing, health check, reconnect...)",
+		RunE:  b.runDefault,
 	}
-
 
 	if u, err := user.Current(); err == nil {
 		b.pkPath = path.Join(u.HomeDir, ".ssh/id_rsa")
