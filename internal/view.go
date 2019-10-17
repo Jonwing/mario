@@ -51,16 +51,16 @@ type Dashboard struct {
 	// tunnels holds information of all tunnels in an id-ascending order
 	tunnels []*TunnelInfo
 
-	mario *Mario
+	Mario *Mario
 
 	input chan string
 }
 
 func (d *Dashboard) Work() error {
-	if d.mario == nil {
-		return errors.New("no mario, probably run in a wrong way")
+	if d.Mario == nil {
+		return errors.New("no Mario, probably run in a wrong way")
 	}
-	tn, err := d.mario.Monitor()
+	tn, err := d.Mario.Monitor()
 	if err != nil {
 		return err
 	}
@@ -74,16 +74,16 @@ func (d *Dashboard) Work() error {
 }
 
 func (d *Dashboard) Quit() {
-	d.mario.Stop()
+	d.Mario.Stop()
 	fmt.Println("Bye.")
 }
 
-func DefaultDashboard(pk string, log logger) *Dashboard {
+func DefaultDashboard(pk string, log logger, timeout int) *Dashboard {
 	d := &Dashboard{
 		tunnels:    make([]*TunnelInfo, 0),
 		tunnelRecv: make(chan *TunnelInfo, 16),
 		input:      make(chan string),
-		mario:      NewMario(pk, 15*time.Second, log),
+		Mario:      NewMario(pk, time.Duration(timeout)*time.Second, log),
 	}
 
 	return d
@@ -108,8 +108,8 @@ func (d *Dashboard) Update(tn *TunnelInfo) {
 	d.tunnelRecv <- tn
 }
 
-func (d *Dashboard) NewTunnel(name string, local, server, remote string, pk string) error {
-	tn, err := d.mario.Establish(name, local, server, remote, pk)
+func (d *Dashboard) NewTunnel(name string, local, server, remote string, pk string, noConnect bool) error {
+	tn, err := d.Mario.Establish(name, local, server, remote, pk, noConnect)
 	if err != nil {
 		return err
 	}
@@ -140,7 +140,7 @@ func (d *Dashboard) getTunnel(idOrName interface{}) (tn *TunnelInfo) {
 
 func (d *Dashboard) CloseTunnel(idOrName interface{}, waitDone bool) (err error) {
 	if tid, ok := idOrName.(int); ok && tid == -1 {
-		d.mario.ApplyAll(actClose, waitDone)
+		d.Mario.ApplyAll(actClose, waitDone)
 		return nil
 	}
 	tn := d.getTunnel(idOrName)
@@ -148,13 +148,13 @@ func (d *Dashboard) CloseTunnel(idOrName interface{}, waitDone bool) (err error)
 		return errors.New(fmt.Sprintf("tunnel with id or name %s not found", idOrName))
 	}
 	waiting := make(chan error, 1)
-	d.mario.Close(tn, waiting)
+	d.Mario.Close(tn, waiting)
 	return <-waiting
 }
 
 func (d *Dashboard) UpTunnel(idOrName interface{}, waitDone bool) (err error) {
 	if tid, ok := idOrName.(int); ok && tid == -1 {
-		d.mario.ApplyAll(actReconnect, waitDone)
+		d.Mario.ApplyAll(actReconnect, waitDone)
 		return nil
 	}
 	tn := d.getTunnel(idOrName)
@@ -162,7 +162,7 @@ func (d *Dashboard) UpTunnel(idOrName interface{}, waitDone bool) (err error) {
 		return errors.New(fmt.Sprintf("tunnel with id or name %s not found", idOrName))
 	}
 	waiting := make(chan error, 1)
-	d.mario.Up(tn, waiting)
+	d.Mario.Up(tn, waiting)
 
 	return <-waiting
 }

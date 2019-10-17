@@ -10,6 +10,7 @@ import (
 	"net"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -130,6 +131,8 @@ type Tunnel struct {
 	// it's also the timeout of a ssh client
 	healthCheckInterval time.Duration
 
+	once sync.Once
+
 	// err stores the latest error of this tunnel
 	err error
 }
@@ -177,7 +180,7 @@ func (t *Tunnel) forceConnect() error {
 	return nil
 }
 
-func (t *Tunnel) Up() {
+func (t *Tunnel) runOnce() {
 	if t.listener != nil {
 		return
 	}
@@ -219,6 +222,10 @@ func (t *Tunnel) Up() {
 			_ = t.forceConnect()
 		}
 	}
+}
+
+func (t *Tunnel) Up() {
+	t.once.Do(t.runOnce)
 }
 
 func (t *Tunnel) listenLocal() {

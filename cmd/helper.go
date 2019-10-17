@@ -25,7 +25,7 @@ func PrivateKey(path string) (io.Reader, error) {
 	return bytes.NewBuffer(file), nil
 }
 
-type log struct {}
+type log struct{}
 
 func (l *log) Debugf(format string, args ...interface{}) {
 	logrus.Debugf(format, args...)
@@ -39,21 +39,23 @@ func (l *log) Errorf(format string, args ...interface{}) {
 	logrus.Errorf(format, args...)
 }
 
-
 type tConfigs struct {
-	Tunnels []*tConfig	`json:"tunnels"`
+	// TunnelTimeout timeout for a tunnel in seconds
+	TunnelTimeout int `json:"tunnel_timeout,omitempty"`
+	// Tunnels list of tunnel config
+	Tunnels []*tConfig `json:"tunnels"`
 }
 
 type tConfig struct {
-	Name string	`json:"name"`
+	Name string `json:"name"`
 
 	Local string `json:"local"`
 
-	SshServer string	`json:"ssh_server"`
+	SshServer string `json:"ssh_server"`
 
-	MapTo string	`json:"map_to"`
+	MapTo string `json:"map_to"`
 
-	PrivateKey string	`json:"private_key,omitempty"`
+	PrivateKey string `json:"private_key,omitempty"`
+
+	DontConnect bool `json:"do_not_connect,omitempty"`
 }
-
-

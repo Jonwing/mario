@@ -151,7 +151,7 @@ func (m *Mario) wrap(t *ssh.Tunnel) *TunnelInfo {
 	return &TunnelInfo{id: int(id), t: t, name: strconv.Itoa(int(id)), mario: m}
 }
 
-func (m *Mario) Establish(name string, local, server, remote string, pk string) (*TunnelInfo, error) {
+func (m *Mario) Establish(name string, local, server, remote string, pk string, noConnect bool) (*TunnelInfo, error) {
 	var key *bytes.Buffer
 	if pk == "" {
 		if m.keyBuf == nil {
@@ -187,13 +187,20 @@ func (m *Mario) Establish(name string, local, server, remote string, pk string) 
 	m.wm.Lock()
 	m.wrappers[tn] = tw
 	m.wm.Unlock()
-	go tn.Up()
+	if !noConnect {
+		go tn.Up()
+	}
 	return tw, nil
 }
 
 func (m *Mario) Up(tn *TunnelInfo, waitDone chan error) {
 	if tn == nil {
 		waitDone <- errors.New("nil tn")
+		return
+	}
+	if tn.t.Status() == ssh.StatusNew {
+		go tn.t.Up()
+		waitDone <- nil
 		return
 	}
 	if tn.t.Status() == ssh.StatusConnected {
@@ -218,8 +225,17 @@ func (m *Mario) ApplyAll(action act, waitDone bool) {
 	waiting := make(chan error, len(m.wrappers))
 	for tn := range m.wrappers {
 		if action == actReconnect {
+			if tn.Status() == ssh.StatusNew {
+				go tn.Up()
+				waiting <- nil
+				continue
+			}
 			tn.Reconnect(waiting)
 		} else {
+			if tn.Status() == ssh.StatusNew {
+				waiting <- nil
+				continue
+			}
 			tn.Down(waiting)
 		}
 	}
@@ -280,6 +296,9 @@ func (m *Mario) Stop() {
 	m.wm.RLock()
 	waiting := make(chan error, len(m.wrappers))
 	for tn := range m.wrappers {
+		if tn.Status() == ssh.StatusNew {
+			waiting <- nil
+		}
 		tn.Down(waiting)
 	}
 	m.wm.RUnlock()
@@ -293,9 +312,6 @@ func (m *Mario) Stop() {
 }
 
 func NewMario(pkPath string, heartbeat time.Duration, logger logger) *Mario {
-	if heartbeat < 30*time.Second {
-		heartbeat = 30 * time.Second
-	}
 	if pkPath == "" {
 		u, err := user.Current()
 		if err == nil {

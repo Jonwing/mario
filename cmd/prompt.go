@@ -298,7 +298,7 @@ func (o *openCommand) Run(cmd *cobra.Command, args []string) {
 		}
 	}
 
-	err := o.root.dashboard.NewTunnel(o.tunnelName, o.local, o.server, o.remote, o.pk)
+	err := o.root.dashboard.NewTunnel(o.tunnelName, o.local, o.server, o.remote, o.pk, false)
 	if err != nil {
 		logrus.WithError(err).Errorf(
 			"Open tunnel failed. local: %d, server: %s, remote: %s", o.local, o.server, o.remote)
@@ -423,7 +423,10 @@ func (s *saveCommand) Run(cmd *cobra.Command, args []string) {
 		configs = append(configs, cfg)
 	}
 
-	tnConfig := &tConfigs{Tunnels: configs}
+	tnConfig := &tConfigs{
+		Tunnels:       configs,
+		TunnelTimeout: int(s.root.dashboard.Mario.CheckAliveInterval.Seconds()),
+	}
 	if s.output == "" {
 		s.output = path.Join(GetUserHome(), "tunnels.json")
 	}

@@ -51,20 +51,19 @@ func (b *baseCommand) runDefault(cmd *cobra.Command, args []string) error {
 
 		defer func() {
 			pprof.StopCPUProfile()
-			pprof.WriteHeapProfile(memProf)
-			cpuProf.Close()
-			memProf.Close()
+			_ = pprof.WriteHeapProfile(memProf)
+			_ = cpuProf.Close()
+			_ = memProf.Close()
 		}()
 	}
 	logger := new(log)
-	dashBoard := internal.DefaultDashboard(b.pkPath, logger)
 	if b.debug {
 		logrus.SetLevel(logrus.DebugLevel)
 	} else {
 		logrus.SetLevel(logrus.InfoLevel)
 	}
 	// logrus.SetFormatter(&logrus.TextFormatter{})
-	configs := &tConfigs{Tunnels: make([]*tConfig, 0)}
+	configs := &tConfigs{Tunnels: make([]*tConfig, 0), TunnelTimeout: 15}
 	// if we get a configPath, load the config
 	if b.configPath != "" {
 		content, err := ioutil.ReadFile(b.configPath)
@@ -76,13 +75,14 @@ func (b *baseCommand) runDefault(cmd *cobra.Command, args []string) error {
 			return err
 		}
 	}
+	dashBoard := internal.DefaultDashboard(b.pkPath, logger, configs.TunnelTimeout)
 
 	tCmd := NewInteractiveCommand(dashBoard)
 
 	// establish tunnels fo existed config
 	go func() {
 		for _, cfg := range configs.Tunnels {
-			_ = dashBoard.NewTunnel(cfg.Name, cfg.Local, cfg.SshServer, cfg.MapTo, cfg.PrivateKey)
+			_ = dashBoard.NewTunnel(cfg.Name, cfg.Local, cfg.SshServer, cfg.MapTo, cfg.PrivateKey, cfg.DontConnect)
 		}
 	}()
 
