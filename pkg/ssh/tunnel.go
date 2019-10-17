@@ -158,9 +158,7 @@ func (t *Tunnel) forceConnect() error {
 	if t.sshClient != nil {
 		t.sshClient.Close()
 	}
-	t.setStatusError(StatusConnecting, nil)
 	var err error
-
 	client, err := sh.Dial("tcp", t.SSHUri, t.sshConfig)
 	if err != nil {
 		return err
@@ -168,6 +166,7 @@ func (t *Tunnel) forceConnect() error {
 	t.sshClient = client
 
 	if t.listener == nil || t.closed() {
+		t.setStatusError(StatusConnecting, nil)
 		listener, err := net.Listen("tcp", t.Local)
 		if err != nil {
 			return err
