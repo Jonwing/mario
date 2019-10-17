@@ -22,13 +22,12 @@ func TestNewTunnel(t *testing.T) {
 		return
 	}
 
-	_, err = NewTunnel(local, sshServer, remoteServer, bytes.NewBuffer(keyFile), nil)
+	_, err = NewTunnel(local, sshServer, remoteServer, bytes.NewBuffer(keyFile), nil, 10*time.Second)
 	if err != nil {
 		t.Errorf("can not init a tunnel, error: %s", err.Error())
 		return
 	}
 }
-
 
 func TestTunnel_Up(t *testing.T) {
 	keyFile, err := ioutil.ReadFile(privateKeyPath)
@@ -38,7 +37,7 @@ func TestTunnel_Up(t *testing.T) {
 	}
 
 	tn, _ := NewTunnel(
-		local, sshServer, remoteServer, bytes.NewBuffer(keyFile), nil)
+		local, sshServer, remoteServer, bytes.NewBuffer(keyFile), nil, 10*time.Second)
 	go func() {
 		tn.Up()
 	}()
@@ -54,4 +53,3 @@ func TestTunnel_Up(t *testing.T) {
 		t.Errorf("can not write to tunnel, error: %s", err.Error())
 	}
 }
-
