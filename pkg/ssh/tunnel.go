@@ -80,10 +80,11 @@ func (c *Connector) forward() error {
 }
 
 func (c *Connector) localToRemote() {
-	_, err := io.Copy(c.remoteConn, c.localConn)
-	if err != nil {
-		c.Close()
-	}
+	// ignore errors of io.Copy
+	// an io.EOF is not an error that will be returned from io.Copy
+	// so if the io.Copy returns, we know that the local connection is closed
+	_, _ = io.Copy(c.remoteConn, c.localConn)
+	c.Close()
 }
 
 func (c *Connector) Close() {
@@ -92,11 +93,12 @@ func (c *Connector) Close() {
 }
 
 func (c *Connector) breakDown() {
-	c.remoteConn.Close()
-	c.localConn.Close()
+	_ = c.remoteConn.Close()
+	_ = c.localConn.Close()
 }
 
 type Tunnel struct {
+	sync.RWMutex
 	// Local the listen address for local tcp server
 	Local string
 
@@ -137,17 +139,22 @@ type Tunnel struct {
 	err error
 }
 
-func (t *Tunnel) Status() TunnelStatus {
+func (t *Tunnel) Status() (st TunnelStatus) {
+	t.RLock()
+	st = t.status
+	t.RUnlock()
 	return t.status
 }
 
-func (t *Tunnel) Error() error {
+func (t *Tunnel) Error() (err error) {
 	// the status should be more accurate than t.err
 	// t.err might be the legacy of last error
+	t.RLock()
 	if t.status&StatusError == StatusError {
-		return t.err
+		err = t.err
 	}
-	return nil
+	t.RUnlock()
+	return err
 }
 
 func (t *Tunnel) String() string {
@@ -196,12 +203,12 @@ func (t *Tunnel) runOnce() {
 			if err != nil {
 				t.setStatusError(StatusError, err)
 			}
-			if t.status&StatusRemoved == StatusRemoved {
+			if t.Status()&StatusRemoved == StatusRemoved {
 				logrus.Debugln("worker get rest......", t.String())
 				return
 			}
 		case <-ticker.C:
-			if t.status&StatusRemoved == StatusRemoved {
+			if t.Status()&StatusRemoved == StatusRemoved {
 				logrus.Debugln("exit heath checker", t.String())
 				return
 			}
@@ -309,12 +316,13 @@ func (t *Tunnel) UpdateStatus(st TunnelStatus, err error) {
 }
 
 func (t *Tunnel) setStatusError(st TunnelStatus, err error) {
+	t.Lock()
 	if err != nil {
 		st |= StatusError
 		t.err = err
 	}
-
 	t.status = st
+	t.Unlock()
 	if t.OnStatus != nil {
 		t.OnStatus(t)
 	}
@@ -359,7 +367,7 @@ func (t *Tunnel) GetConnectors() []*Connector {
 }
 
 func (t *Tunnel) closed() bool {
-	return t.status&StatusClosed == StatusClosed
+	return t.Status()&StatusClosed == StatusClosed
 }
 
 // NewTunnel create a new Tunnel forwarding packages from <local> to <remote> which is in the

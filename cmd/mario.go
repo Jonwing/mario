@@ -63,7 +63,7 @@ func (b *baseCommand) runDefault(cmd *cobra.Command, args []string) error {
 		logrus.SetLevel(logrus.InfoLevel)
 	}
 	// logrus.SetFormatter(&logrus.TextFormatter{})
-	configs := &tConfigs{Tunnels: make([]*tConfig, 0), TunnelTimeout: 15}
+	configs := &tConfigs{Tunnels: make([]*tConfig, 0), TunnelTimeout: b.heartbeatInterval}
 	// if we get a configPath, load the config
 	if b.configPath != "" {
 		content, err := ioutil.ReadFile(b.configPath)
@@ -79,18 +79,19 @@ func (b *baseCommand) runDefault(cmd *cobra.Command, args []string) error {
 
 	tCmd := NewInteractiveCommand(dashBoard)
 
-	// establish tunnels fo existed config
+	err := dashBoard.Work()
+	if err != nil {
+		return err
+	}
+	_ = tCmd.command.Usage()
+
+	// establish tunnels for existed config
 	go func() {
 		for _, cfg := range configs.Tunnels {
 			_ = dashBoard.NewTunnel(cfg.Name, cfg.Local, cfg.SshServer, cfg.MapTo, cfg.PrivateKey, cfg.DontConnect)
 		}
 	}()
 
-	err := dashBoard.Work()
-	if err != nil {
-		return err
-	}
-	_ = tCmd.command.Usage()
 	tCmd.Run()
 	return nil
 }
@@ -103,7 +104,7 @@ func (b *baseCommand) Execute() {
 }
 
 func BuildCommand() *baseCommand {
-	b := &baseCommand{}
+	b := &baseCommand{heartbeatInterval: 15}
 	b.cmd = &cobra.Command{
 		Use:   "mario [options] [flags]",
 		Short: "mario handles pipes(ssh tunnels) for you",
@@ -114,13 +115,13 @@ func BuildCommand() *baseCommand {
 	if u, err := user.Current(); err == nil {
 		b.pkPath = path.Join(u.HomeDir, ".ssh/id_rsa")
 	}
-	b.cmd.PersistentFlags().StringVarP(
+	b.cmd.Flags().StringVarP(
 		&b.configPath, "config", "c", "", "the config file path")
-	b.cmd.PersistentFlags().StringVar(
+	b.cmd.Flags().StringVar(
 		&b.pkPath, "pk", b.pkPath, "pk(private key): the SSH private key file path")
-	b.cmd.PersistentFlags().IntVar(
+	b.cmd.Flags().IntVar(
 		&b.heartbeatInterval, "i", 15, "i(interval): the check-alive interval of a tunnel in second")
-	b.cmd.PersistentFlags().BoolVarP(
+	b.cmd.Flags().BoolVarP(
 		&b.debug, "debug", "v", false, "(v)verbose: logs the debug info")
 	return b
 }
