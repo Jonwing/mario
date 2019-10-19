@@ -149,7 +149,8 @@ func (d *Dashboard) CloseTunnel(idOrName interface{}, waitDone bool) (err error)
 	}
 	waiting := make(chan error, 1)
 	d.Mario.Close(tn, waiting)
-	return <-waiting
+	d.Mario.waitTimeout(time.Second, waiting, 1)
+	return nil
 }
 
 func (d *Dashboard) UpTunnel(idOrName interface{}, waitDone bool) (err error) {
@@ -164,7 +165,8 @@ func (d *Dashboard) UpTunnel(idOrName interface{}, waitDone bool) (err error) {
 	waiting := make(chan error, 1)
 	d.Mario.Up(tn, waiting)
 
-	return <-waiting
+	d.Mario.waitTimeout(time.Second, waiting, 1)
+	return nil
 }
 
 func (d *Dashboard) GetTunnelConnections(idOrName interface{}) []*ssh.Connector {

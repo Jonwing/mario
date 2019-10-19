@@ -198,12 +198,7 @@ func (m *Mario) Up(tn *TunnelInfo, waitDone chan error) {
 		waitDone <- errors.New("nil tn")
 		return
 	}
-	if tn.t.Status() == ssh.StatusNew {
-		go tn.t.Up()
-		waitDone <- nil
-		return
-	}
-	if tn.t.Status() == ssh.StatusConnected {
+	if tn.t.Status()|ssh.StatusConnected == ssh.StatusConnected {
 		waitDone <- nil
 		return
 	}
@@ -223,33 +218,26 @@ func (m *Mario) Close(tn *TunnelInfo, waitDone chan error) {
 func (m *Mario) ApplyAll(action act, waitDone bool) {
 	m.wm.RLock()
 	waiting := make(chan error, len(m.wrappers))
-	for tn := range m.wrappers {
-		if action == actReconnect {
-			if tn.Status() == ssh.StatusNew {
-				go tn.Up()
-				waiting <- nil
-				continue
-			}
-			tn.Reconnect(waiting)
-		} else {
-			if tn.Status() == ssh.StatusNew {
-				waiting <- nil
-				continue
-			}
-			tn.Down(waiting)
+	var method func(*ssh.Tunnel, chan error)
+	if action == actReconnect {
+		method = func(t *ssh.Tunnel, w chan error) {
+			t.Reconnect(w)
+		}
+	} else {
+		method = func(t *ssh.Tunnel, w chan error) {
+			t.Down(w)
 		}
 	}
+
+	for tn := range m.wrappers {
+		method(tn, waiting)
+	}
+
 	m.wm.RUnlock()
 	if !waitDone {
 		return
 	}
-	count := 0
-	for range waiting {
-		count++
-		if count == len(m.wrappers) {
-			break
-		}
-	}
+	m.waitTimeout(2*time.Second, waiting, len(m.wrappers))
 }
 
 func (m *Mario) Monitor() (<-chan *TunnelInfo, error) {
@@ -290,6 +278,24 @@ func (m *Mario) Monitor() (<-chan *TunnelInfo, error) {
 	return m.publishWrapper, nil
 }
 
+// waitTimeout waits on a channel up to `count` errors until timeout
+func (m *Mario) waitTimeout(timeout time.Duration, waiting chan error, count int) (es []error) {
+	if count <= 0 {
+		return
+	}
+	tm := time.NewTimer(timeout)
+	var sum int
+	for {
+		select {
+		case err := <-waiting:
+			sum++
+			es = append(es, err)
+		case <-tm.C:
+			return
+		}
+	}
+}
+
 func (m *Mario) Stop() {
 	logrus.Debugln("Mario stop")
 	m.stop <- struct{}{}
@@ -302,13 +308,7 @@ func (m *Mario) Stop() {
 		tn.Down(waiting)
 	}
 	m.wm.RUnlock()
-	count := 0
-	for range waiting {
-		count++
-		if count == len(m.wrappers) {
-			break
-		}
-	}
+	m.waitTimeout(2*time.Second, waiting, len(m.wrappers))
 }
 
 func NewMario(pkPath string, heartbeat time.Duration, logger logger) *Mario {
