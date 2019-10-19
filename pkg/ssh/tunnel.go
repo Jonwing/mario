@@ -16,15 +16,17 @@ import (
 
 const (
 	// tunnel is new
-	StatusNew = TunnelStatus(1 << iota)
+	StatusNew = TunnelStatus(iota)
 	// connecting to remote
 	StatusConnecting
+	// StatusRunning indicates the tunnel is up and ready for commands
+	StatusRunning = TunnelStatus(1 << 15)
 	// connect successfully and listening
-	StatusConnected
+	StatusConnected = StatusRunning | 1<<2
 	// trying to reconnect
-	StatusReconnecting
+	StatusReconnecting = StatusRunning | 1<<3
 	// indicate that the tunnel is no listening on the given port
-	StatusClosed
+	StatusClosed = StatusRunning | 1<<4
 	// indicate that there is an error
 	StatusError = TunnelStatus(1 << 16)
 	// the tunnel has been shutdown and removed
@@ -58,7 +60,7 @@ func (c *Connector) ID() uint64 {
 	return c.counter
 }
 
-// this implements btree.Item interface so that we can put it into a btree
+// Less this implements btree.Item interface so that we can put it into a btree
 func (c *Connector) Less(item btree.Item) bool {
 	other, ok := item.(*Connector)
 	if !ok {
@@ -71,7 +73,7 @@ func (c *Connector) OpenedAt() time.Time {
 	return c.openedAt
 }
 
-// forwards packages between local connection and remote connection
+// forward forwards packages between local connection and remote connection
 func (c *Connector) forward() error {
 	go c.localToRemote()
 	_, err := io.Copy(c.localConn, c.remoteConn)
@@ -98,7 +100,7 @@ func (c *Connector) breakDown() {
 }
 
 type Tunnel struct {
-	sync.RWMutex
+	mu sync.RWMutex
 	// Local the listen address for local tcp server
 	Local string
 
@@ -140,20 +142,20 @@ type Tunnel struct {
 }
 
 func (t *Tunnel) Status() (st TunnelStatus) {
-	t.RLock()
+	t.mu.RLock()
 	st = t.status
-	t.RUnlock()
+	t.mu.RUnlock()
 	return t.status
 }
 
 func (t *Tunnel) Error() (err error) {
 	// the status should be more accurate than t.err
 	// t.err might be the legacy of last error
-	t.RLock()
+	t.mu.RLock()
 	if t.status&StatusError == StatusError {
 		err = t.err
 	}
-	t.RUnlock()
+	t.mu.RUnlock()
 	return err
 }
 
@@ -187,6 +189,12 @@ func (t *Tunnel) forceConnect() error {
 }
 
 func (t *Tunnel) runOnce() {
+	defer func() {
+		t.mu.Lock()
+		t.status &= ^StatusRunning
+		t.mu.Unlock()
+	}()
+
 	if t.listener != nil {
 		return
 	}
@@ -231,7 +239,10 @@ func (t *Tunnel) runOnce() {
 }
 
 func (t *Tunnel) Up() {
-	t.once.Do(t.runOnce)
+	if t.running() {
+		return
+	}
+	t.runOnce()
 }
 
 func (t *Tunnel) listenLocal() {
@@ -261,6 +272,12 @@ func (t *Tunnel) listenLocal() {
 }
 
 func (t *Tunnel) Down(waitDone chan<- error) {
+	if !t.running() {
+		if waitDone != nil {
+			waitDone <- nil
+		}
+		return
+	}
 	t.works <- func() error {
 		t.connectors.Ascend(func(i btree.Item) bool {
 			cnt := i.(*Connector)
@@ -280,6 +297,13 @@ func (t *Tunnel) Down(waitDone chan<- error) {
 // the difference between Down() and Destroy() is that Destroy() exits the running
 // goroutine so that all subsequent works will failed, which making this tunnel unavailable
 func (t *Tunnel) Destroy(waitDone chan<- error) {
+	if !t.running() {
+		t.setStatusError(StatusRemoved, nil)
+		if waitDone != nil {
+			waitDone <- nil
+		}
+		return
+	}
 	t.works <- func() error {
 		t.connectors.Ascend(func(i btree.Item) bool {
 			cnt := i.(*Connector)
@@ -297,6 +321,9 @@ func (t *Tunnel) Destroy(waitDone chan<- error) {
 }
 
 func (t *Tunnel) Reconnect(waitDone chan<- error) {
+	if !t.running() {
+		go t.Up()
+	}
 	if waitDone == nil {
 		t.works <- t.forceConnect
 		return
@@ -316,13 +343,13 @@ func (t *Tunnel) UpdateStatus(st TunnelStatus, err error) {
 }
 
 func (t *Tunnel) setStatusError(st TunnelStatus, err error) {
-	t.Lock()
+	t.mu.Lock()
 	if err != nil {
 		st |= StatusError
 		t.err = err
 	}
 	t.status = st
-	t.Unlock()
+	t.mu.Unlock()
 	if t.OnStatus != nil {
 		t.OnStatus(t)
 	}
@@ -353,6 +380,9 @@ func (t *Tunnel) closeConnector(c *Connector) {
 }
 
 func (t *Tunnel) GetConnectors() []*Connector {
+	if !t.running() {
+		return nil
+	}
 	connChan := make(chan []*Connector)
 	t.works <- func() error {
 		cs := make([]*Connector, 0, t.connectors.Len())
@@ -368,6 +398,10 @@ func (t *Tunnel) GetConnectors() []*Connector {
 
 func (t *Tunnel) closed() bool {
 	return t.Status()&StatusClosed == StatusClosed
+}
+
+func (t *Tunnel) running() bool {
+	return t.Status()&StatusRunning == StatusRunning
 }
 
 // NewTunnel create a new Tunnel forwarding packages from <local> to <remote> which is in the
