@@ -151,6 +151,14 @@ func (m *Mario) wrap(t *ssh.Tunnel) *TunnelInfo {
 	return &TunnelInfo{id: int(id), t: t, name: strconv.Itoa(int(id)), mario: m}
 }
 
+// Establish setups a new channel, if `noConnect` is true, only initiate a new tunnel.
+// args
+// 	name: 		name of a tunnel
+// 	local:		local listening address
+// 	server: 	ssh server address
+// 	remote: 	address of remote peer of the tunnel
+// 	pk: 		private key path
+// 	noConnect: 	don't connect now
 func (m *Mario) Establish(name string, local, server, remote string, pk string, noConnect bool) (*TunnelInfo, error) {
 	var key *bytes.Buffer
 	if pk == "" {
@@ -198,7 +206,7 @@ func (m *Mario) Up(tn *TunnelInfo, waitDone chan error) {
 		waitDone <- errors.New("nil tn")
 		return
 	}
-	if tn.t.Status()|ssh.StatusConnected == ssh.StatusConnected {
+	if tn.t.Status()&ssh.StatusConnected == ssh.StatusConnected {
 		waitDone <- nil
 		return
 	}
@@ -259,16 +267,14 @@ func (m *Mario) Monitor() (<-chan *TunnelInfo, error) {
 					action.tn.t.Reconnect(action.err)
 				}
 			case raw := <-m.updatedTunnels:
-				m.wm.RLock()
+				m.wm.Lock()
 				wrapped, ok := m.wrappers[raw]
-				m.wm.RUnlock()
 				if !ok {
 					wrapped = m.wrap(raw)
 					wrapped.name = "unknown"
-					m.wm.Lock()
 					m.wrappers[wrapped.t] = wrapped
-					m.wm.Unlock()
 				}
+				m.wm.Unlock()
 				m.publishWrapper <- wrapped
 			case <-m.stop:
 				break
@@ -279,7 +285,7 @@ func (m *Mario) Monitor() (<-chan *TunnelInfo, error) {
 }
 
 // waitTimeout waits on a channel up to `count` errors until timeout
-func (m *Mario) waitTimeout(timeout time.Duration, waiting chan error, count int) (es []error) {
+func (m *Mario) waitTimeout(timeout time.Duration, waiting <-chan error, count int) (es []error) {
 	if count <= 0 {
 		return
 	}
@@ -290,6 +296,9 @@ func (m *Mario) waitTimeout(timeout time.Duration, waiting chan error, count int
 		case err := <-waiting:
 			sum++
 			es = append(es, err)
+			if sum >= count {
+				return
+			}
 		case <-tm.C:
 			return
 		}
@@ -300,6 +309,7 @@ func (m *Mario) Stop() {
 	logrus.Debugln("Mario stop")
 	m.stop <- struct{}{}
 	m.wm.RLock()
+	defer m.wm.RUnlock()
 	waiting := make(chan error, len(m.wrappers))
 	for tn := range m.wrappers {
 		if tn.Status() == ssh.StatusNew {
@@ -307,7 +317,6 @@ func (m *Mario) Stop() {
 		}
 		tn.Down(waiting)
 	}
-	m.wm.RUnlock()
 	m.waitTimeout(2*time.Second, waiting, len(m.wrappers))
 }
 
@@ -322,9 +331,9 @@ func NewMario(pkPath string, heartbeat time.Duration, logger logger) *Mario {
 		tunnelCount:        0,
 		CheckAliveInterval: heartbeat,
 		KeyPath:            pkPath,
-		actions:            make(chan *tnAction, 16),
-		updatedTunnels:     make(chan *ssh.Tunnel, 32),
-		publishWrapper:     make(chan *TunnelInfo, 32),
+		actions:            make(chan *tnAction, 1),
+		updatedTunnels:     make(chan *ssh.Tunnel, 1),
+		publishWrapper:     make(chan *TunnelInfo, 1),
 		logger:             logger,
 		wrappers:           make(map[*ssh.Tunnel]*TunnelInfo),
 		wm:                 sync.RWMutex{},

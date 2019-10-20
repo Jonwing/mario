@@ -81,7 +81,7 @@ func (d *Dashboard) Quit() {
 func DefaultDashboard(pk string, log logger, timeout int) *Dashboard {
 	d := &Dashboard{
 		tunnels:    make([]*TunnelInfo, 0),
-		tunnelRecv: make(chan *TunnelInfo, 16),
+		tunnelRecv: make(chan *TunnelInfo, 1),
 		input:      make(chan string),
 		Mario:      NewMario(pk, time.Duration(timeout)*time.Second, log),
 	}

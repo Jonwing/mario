@@ -143,8 +143,8 @@ type Tunnel struct {
 
 func (t *Tunnel) Status() (st TunnelStatus) {
 	t.mu.RLock()
+	defer t.mu.RUnlock()
 	st = t.status
-	t.mu.RUnlock()
 	return t.status
 }
 
@@ -152,10 +152,10 @@ func (t *Tunnel) Error() (err error) {
 	// the status should be more accurate than t.err
 	// t.err might be the legacy of last error
 	t.mu.RLock()
+	defer t.mu.RUnlock()
 	if t.status&StatusError == StatusError {
 		err = t.err
 	}
-	t.mu.RUnlock()
 	return err
 }
 
@@ -344,12 +344,12 @@ func (t *Tunnel) UpdateStatus(st TunnelStatus, err error) {
 
 func (t *Tunnel) setStatusError(st TunnelStatus, err error) {
 	t.mu.Lock()
+	defer t.mu.Unlock()
 	if err != nil {
 		st |= StatusError
 		t.err = err
 	}
 	t.status = st
-	t.mu.Unlock()
 	if t.OnStatus != nil {
 		t.OnStatus(t)
 	}
@@ -457,7 +457,7 @@ func NewTunnel(local string, server string, remote string, pk io.Reader, onStatu
 		connectors:          btree.New(2),
 		OnStatus:            onStatus,
 		status:              StatusNew,
-		works:               make(chan func() error, 32),
+		works:               make(chan func() error, 1),
 		healthCheckInterval: sshTimeout,
 	}
 	return tn, nil
