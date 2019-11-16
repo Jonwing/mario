@@ -411,6 +411,10 @@ func (s *saveCommand) Complete(args []string, word string) []prompt.Suggest {
 }
 
 func (s *saveCommand) Run(cmd *cobra.Command, args []string) {
+
+	if s.output == "" {
+		s.output = path.Join(GetUserHome(), "tunnels.json")
+	}
 	tns := s.root.dashboard.GetTunnels()
 	configs := make([]*tConfig, 0)
 	for _, tn := range tns {
@@ -423,15 +427,28 @@ func (s *saveCommand) Run(cmd *cobra.Command, args []string) {
 		configs = append(configs, cfg)
 	}
 
-	tnConfig := &tConfigs{
-		Tunnels:       configs,
-		TunnelTimeout: int(s.root.dashboard.Mario.CheckAliveInterval.Seconds()),
-	}
-	if s.output == "" {
-		s.output = path.Join(GetUserHome(), "tunnels.json")
+	toSave, err := LoadJsonConfig(s.output)
+	if err == nil {
+		for _, tn := range configs {
+			idOld := false
+			for _, old := range toSave.Tunnels {
+				if tn.Name == old.Name {
+					idOld = true
+					break
+				}
+			}
+			if !idOld {
+				toSave.Tunnels = append(toSave.Tunnels, tn)
+			}
+		}
+	} else {
+		toSave = &tConfigs{
+			Tunnels:       configs,
+			TunnelTimeout: int(s.root.dashboard.Mario.CheckAliveInterval.Seconds()),
+		}
 	}
 
-	marshaled, err := json.MarshalIndent(tnConfig, "", "    ")
+	marshaled, err := json.MarshalIndent(toSave, "", "    ")
 	if err != nil {
 		logrus.WithError(err).Errorln("save tunnels failed.")
 	}

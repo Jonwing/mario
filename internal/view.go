@@ -191,8 +191,3 @@ func (d *Dashboard) GetTunnels() []*TunnelInfo {
 	}
 	return tns
 }
-
-// debug purpose
-func (d *Dashboard) GetInput() <-chan string {
-	return d.input
-}

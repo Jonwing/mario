@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"bytes"
+	"encoding/json"
 	"github.com/sirupsen/logrus"
 	"io"
 	"io/ioutil"
@@ -58,4 +59,17 @@ type tConfig struct {
 	PrivateKey string `json:"private_key,omitempty"`
 
 	DontConnect bool `json:"do_not_connect,omitempty"`
+}
+
+func LoadJsonConfig(path string) (*tConfigs, error) {
+	newCfg := &tConfigs{Tunnels: make([]*tConfig, 0)}
+	content, err := ioutil.ReadFile(path)
+	if err != nil {
+		return nil, err
+	}
+	err = json.Unmarshal(content, newCfg)
+	if err != nil {
+		return nil, err
+	}
+	return newCfg, nil
 }

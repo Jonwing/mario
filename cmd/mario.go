@@ -62,7 +62,7 @@ func (b *baseCommand) runDefault(cmd *cobra.Command, args []string) error {
 	} else {
 		logrus.SetLevel(logrus.InfoLevel)
 	}
-	// logrus.SetFormatter(&logrus.TextFormatter{})
+
 	configs := &tConfigs{Tunnels: make([]*tConfig, 0), TunnelTimeout: b.heartbeatInterval}
 	// if we get a configPath, load the config
 	if b.configPath != "" {
