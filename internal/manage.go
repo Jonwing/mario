@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"errors"
 	"github.com/Jonwing/mario/pkg/ssh"
-	"github.com/sirupsen/logrus"
 	"io/ioutil"
 	"os/user"
 	"path"
@@ -109,12 +108,6 @@ func (t *TunnelInfo) Connections() []*ssh.Connector {
 	return t.t.GetConnectors()
 }
 
-type logger interface {
-	Debugf(format string, args ...interface{})
-	Infof(format string, args ...interface{})
-	Errorf(format string, args ...interface{})
-}
-
 type Mario struct {
 	tunnelCount int32
 
@@ -132,8 +125,6 @@ type Mario struct {
 
 	// updatedTunnels receives tunnels whose status have been changed
 	updatedTunnels chan *ssh.Tunnel
-
-	logger logger
 
 	wrappers map[*ssh.Tunnel]*TunnelInfo
 
@@ -306,7 +297,6 @@ func (m *Mario) waitTimeout(timeout time.Duration, waiting <-chan error, count i
 }
 
 func (m *Mario) Stop() {
-	logrus.Debugln("Mario stop")
 	m.stop <- struct{}{}
 	m.wm.RLock()
 	defer m.wm.RUnlock()
@@ -320,7 +310,7 @@ func (m *Mario) Stop() {
 	m.waitTimeout(2*time.Second, waiting, len(m.wrappers))
 }
 
-func NewMario(pkPath string, heartbeat time.Duration, logger logger) *Mario {
+func NewMario(pkPath string, heartbeat time.Duration) *Mario {
 	if pkPath == "" {
 		u, err := user.Current()
 		if err == nil {
@@ -334,7 +324,6 @@ func NewMario(pkPath string, heartbeat time.Duration, logger logger) *Mario {
 		actions:            make(chan *tnAction, 1),
 		updatedTunnels:     make(chan *ssh.Tunnel, 1),
 		publishWrapper:     make(chan *TunnelInfo, 1),
-		logger:             logger,
 		wrappers:           make(map[*ssh.Tunnel]*TunnelInfo),
 		wm:                 sync.RWMutex{},
 		stop:               make(chan struct{}),

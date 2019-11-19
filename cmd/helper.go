@@ -3,7 +3,6 @@ package cmd
 import (
 	"bytes"
 	"encoding/json"
-	"github.com/sirupsen/logrus"
 	"io"
 	"io/ioutil"
 	"os/user"
@@ -24,20 +23,6 @@ func PrivateKey(path string) (io.Reader, error) {
 		return nil, err
 	}
 	return bytes.NewBuffer(file), nil
-}
-
-type log struct{}
-
-func (l *log) Debugf(format string, args ...interface{}) {
-	logrus.Debugf(format, args...)
-}
-
-func (l *log) Infof(format string, args ...interface{}) {
-	logrus.Infof(format, args...)
-}
-
-func (l *log) Errorf(format string, args ...interface{}) {
-	logrus.Errorf(format, args...)
 }
 
 type tConfigs struct {

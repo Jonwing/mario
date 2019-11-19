@@ -6,15 +6,14 @@ import (
 	"github.com/c-bata/go-prompt"
 	json "github.com/json-iterator/go"
 	"github.com/olekukonko/tablewriter"
-	"github.com/sirupsen/logrus"
 	"github.com/spf13/cobra"
 	"github.com/spf13/pflag"
+	"go.uber.org/atomic"
 	"io/ioutil"
 	"os"
 	"path"
 	"strconv"
 	"strings"
-	"sync/atomic"
 )
 
 type completeFunc func(cmd promptCommand, args []string, current string) []prompt.Suggest
@@ -80,7 +79,7 @@ func (i *interactiveCmd) ClearFlags() {
 	}
 	err := h.Value.Set("false")
 	if err != nil {
-		fmt.Printf("error clearing help flag: %s\n", err.Error())
+		i.logger.Error("error clearing help flag: %s\n", err.Error())
 	}
 }
 
@@ -93,7 +92,7 @@ func (i *interactiveCmd) runCommand(txt string) {
 	args := strings.Split(txt, " ")
 	err := i.RunCommand(args)
 	if err != nil {
-		logrus.Errorln("command error: ", err.Error())
+		i.logger.Errorw("command error: ", "error", err.Error())
 	}
 	for _, cmd := range i.children {
 		cmd.ClearFlags()
@@ -272,19 +271,19 @@ func (o *openCommand) Run(cmd *cobra.Command, args []string) {
 		// this should split the link into [mapping, server] slice
 		parts := strings.SplitN(o.link, "@", 2)
 		if len(parts) != 2 {
-			logrus.Errorln("wrong link: ", o.link)
+			o.root.logger.Error("wrong link: ", o.link)
 			return
 		}
 		// this should split mapping into [local host, local port, remote] slice
 		mapping := strings.SplitN(parts[0], ":", 3)
 		if len(mapping) != 3 {
-			logrus.Errorln("wrong link: ", o.link)
+			o.root.logger.Error("wrong link: ", o.link)
 			return
 		}
 
 		_, err := strconv.Atoi(mapping[1])
 		if err != nil {
-			logrus.Errorln("port must be a number: ", mapping[1])
+			o.root.logger.Error("port must be a number: ", mapping[1])
 			return
 		}
 		o.local = strings.Join(mapping[:2], ":")
@@ -293,15 +292,16 @@ func (o *openCommand) Run(cmd *cobra.Command, args []string) {
 		o.server = parts[1]
 	} else {
 		if o.server == "" || o.remote == "" {
-			logrus.Errorln("[Error]Should specify server by -s and remote by -r")
+			o.root.logger.Error("[Error]Should specify server by -s and remote by -r")
 			return
 		}
 	}
 
 	err := o.root.dashboard.NewTunnel(o.tunnelName, o.local, o.server, o.remote, o.pk, false)
 	if err != nil {
-		logrus.WithError(err).Errorf(
-			"Open tunnel failed. local: %d, server: %s, remote: %s", o.local, o.server, o.remote)
+		o.root.logger.Errorw(
+			"Open tunnel failed. ",
+			"local", o.local, "server", o.server, "remote", o.remote, "error", err)
 	}
 }
 
@@ -370,7 +370,7 @@ func (c *closeOrUpCommand) Run(cmd *cobra.Command, args []string) {
 		for _, str := range args {
 			id, err := strconv.Atoi(str)
 			if err != nil {
-				logrus.Errorln("id should be a number", args[0])
+				c.root.logger.Error("id should be a number: ", args[0])
 				return
 			}
 			err = method(id, true)
@@ -381,7 +381,7 @@ func (c *closeOrUpCommand) Run(cmd *cobra.Command, args []string) {
 	}
 
 	if err != nil {
-		logrus.Errorln(c.name, "failed: ", err.Error())
+		c.root.logger.Error(c.name, "failed: ", err.Error())
 	}
 	c.listCmd.Run(nil, nil)
 }
@@ -450,12 +450,12 @@ func (s *saveCommand) Run(cmd *cobra.Command, args []string) {
 
 	marshaled, err := json.MarshalIndent(toSave, "", "    ")
 	if err != nil {
-		logrus.WithError(err).Errorln("save tunnels failed.")
+		s.root.logger.Errorw("save tunnels failed.", "error", err)
 	}
 
 	err = ioutil.WriteFile(s.output, marshaled, 0644)
 	if err != nil {
-		logrus.Errorln("can not write file to disk because of: ", err)
+		s.root.logger.Errorw("can not write file to disk because of: ", "error", err)
 	}
 }
 
@@ -501,14 +501,14 @@ func (c *viewCommand) Complete(args []string, word string) []prompt.Suggest {
 
 func (c *viewCommand) Run(cmd *cobra.Command, args []string) {
 	if len(args) == 0 && c.tunnelName == "" {
-		logrus.Errorln("specify tunnel id or tunnel name")
+		c.root.logger.Error("specify tunnel id or tunnel name")
 		return
 	}
 	var cs []*ssh.Connector
 	if len(args) > 0 {
 		id, err := strconv.Atoi(args[0])
 		if err != nil {
-			logrus.Errorln("id should be a number", args[0])
+			c.root.logger.Error("id should be a number", args[0])
 			return
 		}
 		// close tunnel with id
@@ -710,24 +710,23 @@ func flagHasPrefix(w string, filterTo *[]prompt.Suggest) func(flag *pflag.Flag) 
 type ExitParser struct {
 	*prompt.PosixParser
 
-	exit uint32
+	exit atomic.Bool
 }
 
 func (e *ExitParser) Read() ([]byte, error) {
-	exited := atomic.LoadUint32(&e.exit)
-	if exited > 0 {
+	exited := e.exit.Load()
+	if exited {
 		return []byte{0x04}, nil
 	}
 	return e.PosixParser.Read()
 }
 
 func (e *ExitParser) Exit() {
-	atomic.StoreUint32(&e.exit, 1)
+	e.exit.Store(true)
 }
 
 func NewExitParser() *ExitParser {
 	return &ExitParser{
 		PosixParser: prompt.NewStandardInputParser(),
-		exit:        0,
 	}
 }

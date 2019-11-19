@@ -5,6 +5,7 @@ import (
 	"github.com/c-bata/go-prompt"
 	"github.com/c-bata/go-prompt/completer"
 	"github.com/spf13/cobra"
+	"go.uber.org/zap"
 	"regexp"
 )
 
@@ -47,6 +48,8 @@ type interactiveCmd struct {
 	exitParser *ExitParser
 
 	children []promptCommand
+
+	logger *zap.SugaredLogger
 }
 
 func NewInteractiveCommand(dashboard *internal.Dashboard) *interactiveCmd {
@@ -127,4 +130,14 @@ func (i *interactiveCmd) execute(cmd *cobra.Command, args []string) {
 
 func (i *interactiveCmd) Run() {
 	i.pmt.Run()
+}
+
+func (i *interactiveCmd) configLogger(debug bool) {
+	var logger *zap.Logger
+	if debug {
+		logger, _ = zap.NewDevelopment()
+	} else {
+		logger, _ = zap.NewProduction()
+	}
+	i.logger = logger.Sugar()
 }

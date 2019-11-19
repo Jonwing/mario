@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"errors"
 	"github.com/google/btree"
-	"github.com/sirupsen/logrus"
 	sh "golang.org/x/crypto/ssh"
 	"io"
 	"net"
@@ -212,18 +211,15 @@ func (t *Tunnel) runOnce() {
 				t.setStatusError(StatusError, err)
 			}
 			if t.Status()&StatusRemoved == StatusRemoved {
-				logrus.Debugln("worker get rest......", t.String())
 				return
 			}
 		case <-ticker.C:
 			if t.Status()&StatusRemoved == StatusRemoved {
-				logrus.Debugln("exit heath checker", t.String())
 				return
 			}
 			if t.closed() && t.Error() == nil {
 				continue
 			}
-			logrus.Debugln("keep ", t.String(), "alive")
 			if t.sshClient == nil {
 				t.setStatusError(StatusError, errRemoteLost)
 			} else {

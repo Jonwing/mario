@@ -4,7 +4,6 @@ import (
 	"errors"
 	"fmt"
 	"github.com/Jonwing/mario/pkg/ssh"
-	"github.com/sirupsen/logrus"
 	"sort"
 	"strconv"
 	"time"
@@ -75,15 +74,15 @@ func (d *Dashboard) Work() error {
 
 func (d *Dashboard) Quit() {
 	d.Mario.Stop()
-	fmt.Println("Bye.")
+	fmt.Println("Bye.👋")
 }
 
-func DefaultDashboard(pk string, log logger, timeout int) *Dashboard {
+func DefaultDashboard(pk string, timeout int) *Dashboard {
 	d := &Dashboard{
 		tunnels:    make([]*TunnelInfo, 0),
 		tunnelRecv: make(chan *TunnelInfo, 1),
 		input:      make(chan string),
-		Mario:      NewMario(pk, time.Duration(timeout)*time.Second, log),
+		Mario:      NewMario(pk, time.Duration(timeout)*time.Second),
 	}
 
 	return d
@@ -100,7 +99,6 @@ func (d *Dashboard) updateTunnelInfo() {
 				tnSorter(byID).sort(d.tunnels)
 			}
 		}
-		logrus.Debugf("tunnel <%d><%s> status changed to: %s", tn.GetID(), tn.GetName(), tn.GetStatus())
 	}
 }
 

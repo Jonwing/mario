@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"github.com/Jonwing/mario/internal"
 	json "github.com/json-iterator/go"
-	"github.com/sirupsen/logrus"
 	"github.com/spf13/cobra"
 	"io/ioutil"
 	"os"
@@ -56,12 +55,6 @@ func (b *baseCommand) runDefault(cmd *cobra.Command, args []string) error {
 			_ = memProf.Close()
 		}()
 	}
-	logger := new(log)
-	if b.debug {
-		logrus.SetLevel(logrus.DebugLevel)
-	} else {
-		logrus.SetLevel(logrus.InfoLevel)
-	}
 
 	configs := &tConfigs{Tunnels: make([]*tConfig, 0), TunnelTimeout: b.heartbeatInterval}
 	// if we get a configPath, load the config
@@ -75,9 +68,10 @@ func (b *baseCommand) runDefault(cmd *cobra.Command, args []string) error {
 			return err
 		}
 	}
-	dashBoard := internal.DefaultDashboard(b.pkPath, logger, configs.TunnelTimeout)
+	dashBoard := internal.DefaultDashboard(b.pkPath, configs.TunnelTimeout)
 
 	tCmd := NewInteractiveCommand(dashBoard)
+	tCmd.configLogger(b.debug)
 
 	err := dashBoard.Work()
 	if err != nil {
