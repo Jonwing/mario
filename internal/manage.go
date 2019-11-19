@@ -8,6 +8,7 @@ import (
 	"os/user"
 	"path"
 	"strconv"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -151,6 +152,10 @@ func (m *Mario) wrap(t *ssh.Tunnel) *TunnelInfo {
 // 	pk: 		private key path
 // 	noConnect: 	don't connect now
 func (m *Mario) Establish(name string, local, server, remote string, pk string, noConnect bool) (*TunnelInfo, error) {
+	words := strings.Split(name, " ")
+	if len(words) > 1 {
+		return nil, errors.New("spaces in tunnel name are not supported currently")
+	}
 	var key *bytes.Buffer
 	if pk == "" {
 		if m.keyBuf == nil {

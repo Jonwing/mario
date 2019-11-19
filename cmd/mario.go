@@ -82,7 +82,10 @@ func (b *baseCommand) runDefault(cmd *cobra.Command, args []string) error {
 	// establish tunnels for existed config
 	go func() {
 		for _, cfg := range configs.Tunnels {
-			_ = dashBoard.NewTunnel(cfg.Name, cfg.Local, cfg.SshServer, cfg.MapTo, cfg.PrivateKey, cfg.DontConnect)
+			err = dashBoard.NewTunnel(cfg.Name, cfg.Local, cfg.SshServer, cfg.MapTo, cfg.PrivateKey, cfg.DontConnect)
+			if err != nil {
+				fmt.Printf("[Error] tunnel `%s` open failed because of %s", cfg.Name, err.Error())
+			}
 		}
 	}()
 
