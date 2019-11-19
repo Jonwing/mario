@@ -6,6 +6,7 @@ import (
 	"github.com/Jonwing/mario/pkg/ssh"
 	"sort"
 	"strconv"
+	"sync"
 	"time"
 )
 
@@ -45,6 +46,8 @@ func byName(i, j *TunnelInfo) bool {
 }
 
 type Dashboard struct {
+	mu sync.RWMutex
+
 	tunnelRecv chan *TunnelInfo
 
 	// tunnels holds information of all tunnels in an id-ascending order
@@ -90,6 +93,7 @@ func DefaultDashboard(pk string, timeout int) *Dashboard {
 
 func (d *Dashboard) updateTunnelInfo() {
 	for tn := range d.tunnelRecv {
+		d.mu.Lock()
 		idx := sort.Search(len(d.tunnels), func(i int) bool {
 			return d.tunnels[i].GetID() >= tn.GetID()
 		})
@@ -99,6 +103,7 @@ func (d *Dashboard) updateTunnelInfo() {
 				tnSorter(byID).sort(d.tunnels)
 			}
 		}
+		d.mu.Unlock()
 	}
 }
 
@@ -116,6 +121,8 @@ func (d *Dashboard) NewTunnel(name string, local, server, remote string, pk stri
 }
 
 func (d *Dashboard) getTunnel(idOrName interface{}) (tn *TunnelInfo) {
+	d.mu.RLock()
+	defer d.mu.RUnlock()
 	switch idOrName.(type) {
 	case int:
 		v := idOrName.(int)
@@ -180,6 +187,8 @@ func (d *Dashboard) formatTunnel(tn *TunnelInfo) string {
 }
 
 func (d *Dashboard) GetTunnels() []*TunnelInfo {
+	d.mu.RLock()
+	defer d.mu.RUnlock()
 	if len(d.tunnels) == 0 {
 		return nil
 	}
