@@ -297,17 +297,15 @@ func (m *Mario) waitTimeout(timeout time.Duration, waiting <-chan error, count i
 }
 
 func (m *Mario) Stop() {
-	m.stop <- struct{}{}
 	m.wm.RLock()
-	defer m.wm.RUnlock()
-	waiting := make(chan error, len(m.wrappers))
+	wl := len(m.wrappers)
+	waiting := make(chan error, wl)
 	for tn := range m.wrappers {
-		if tn.Status() == ssh.StatusNew {
-			waiting <- nil
-		}
 		tn.Down(waiting)
 	}
-	m.waitTimeout(2*time.Second, waiting, len(m.wrappers))
+	m.wm.RUnlock()
+	m.waitTimeout(2*time.Second, waiting, wl)
+	m.stop <- struct{}{}
 }
 
 func NewMario(pkPath string, heartbeat time.Duration) *Mario {
