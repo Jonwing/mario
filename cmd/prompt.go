@@ -708,7 +708,7 @@ func flagHasPrefix(w string, filterTo *[]prompt.Suggest) func(flag *pflag.Flag) 
 // ExitParser modifies the original parser to provide an ability to exit directly(return
 // from `Run` method of a Prompt), while the original way is to press Control+D.
 type ExitParser struct {
-	*prompt.PosixParser
+	prompt.ConsoleParser
 
 	exit atomic.Bool
 }
@@ -718,7 +718,7 @@ func (e *ExitParser) Read() ([]byte, error) {
 	if exited {
 		return []byte{0x04}, nil
 	}
-	return e.PosixParser.Read()
+	return e.ConsoleParser.Read()
 }
 
 func (e *ExitParser) Exit() {
@@ -727,6 +727,6 @@ func (e *ExitParser) Exit() {
 
 func NewExitParser() *ExitParser {
 	return &ExitParser{
-		PosixParser: prompt.NewStandardInputParser(),
+		ConsoleParser: prompt.NewStandardInputParser(),
 	}
 }
